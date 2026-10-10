@@ -1,0 +1,36 @@
+{
+  "name": "nagrek",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Nagrek — Never Eat Alone. Location-based food-matching live video.",
+  "main": "server.js",
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "NODE_ENV=development node server.js",
+    "build": "next build",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24.10.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "clsx": "^2.1.1",
+    "framer-motion": "^14.0.0",
+    "gsap": "^3.15.0",
+    "lucide-react": "^1.16.0",
+    "next": "16.4.0",
+    "postcss": "^8.5.23",
+    "react": "^19",
+    "react-dom": "^19",
+    "socket.io": "^4.8.4",
+    "socket.io-client": "^4.8.4",
+    "tailwind-merge": "^3.3.1",
+    "tailwindcss": "^4.3.3",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "5.7.3"
+  }
+}
