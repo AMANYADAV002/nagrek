@@ -17,6 +17,7 @@ import { FriendsScreen } from './friends-screen'
 import { HeroScreen } from './hero-screen'
 import { MatchingScreen } from './matching-screen'
 import { PaywallScreen } from './paywall-screen'
+import { PostCallRating } from './post-call-rating'
 import { ProfileSetupScreen } from './profile-setup-screen'
 import { SiteHeader } from './site-header'
 import { VideoScreen } from './video-screen'
@@ -209,6 +210,7 @@ export function NagrekApp() {
         displayName={auth.profile?.display_name || auth.profile?.username || undefined}
         avatarUrl={auth.profile?.avatar_url}
         queueWaiting={session.queueWaiting}
+        onlineCount={session.onlineCount}
         onHome={actions.goHome}
         onSignOut={auth.signOut}
         onSignIn={actions.goToAuth}
@@ -268,6 +270,7 @@ export function NagrekApp() {
                 onCellChange={session.setLocationCell}
                 onSelect={actions.begin}
                 queueWaiting={session.queueWaiting}
+                onlineCount={session.onlineCount}
               />
             )}
             {stage === 'matching' && food && (
@@ -333,6 +336,16 @@ export function NagrekApp() {
               actions.callFriend(id)
             }}
             onClose={() => setFriendsOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {session.lastEndedMatchId && stage === 'select' && mode !== 'demo' && (
+          <PostCallRating
+            key="post-call-rating"
+            onRate={handleRate}
+            onDismiss={() => session.setLastEndedMatchId(null)}
           />
         )}
       </AnimatePresence>

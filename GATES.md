@@ -35,3 +35,4 @@ Owner replies with explicit `approve GATE-<id>`. Secrets are never pasted into c
 - **GATE-G12** — GPS consent UI is implemented; approve before enabling production location collection messaging/cutover.
 - **GATE-G7** — web push code is stubbed off; approve before sending to real users.
 - **GATE-G3 / G4 / G10** — Hostinger env + staging/production deploy; do not cut over nagrek.com without approval.
+- **GATE-G1 (extra)** — apply `supabase/migrations/005_ambassador.sql` with the other growth migrations.

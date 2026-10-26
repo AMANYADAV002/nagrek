@@ -1,10 +1,11 @@
 'use client'
 
 import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion'
-import { ArrowUpRight, Crosshair, Loader2, MapPin, Shield } from 'lucide-react'
+import { ArrowUpRight, Bell, BellOff, Crosshair, Loader2, MapPin, Shield } from 'lucide-react'
 import Image from 'next/image'
 import { useRef } from 'react'
 import { useGeoRegion } from '@/hooks/use-geo-region'
+import { useMealWindowNotify } from '@/hooks/use-meal-window-notify'
 import { FOODS, type Food, type FoodId } from '@/lib/foods'
 import { currentMealWindow, formatMinutesUntil, nextMealWindow } from '@/lib/meal-windows'
 import { REGIONS } from '@/lib/regions'
@@ -17,6 +18,7 @@ interface CravingScreenProps {
   onCellChange?: (cell: string | null) => void
   onSelect: (food: FoodId) => void
   queueWaiting?: number
+  onlineCount?: number
 }
 
 export function CravingScreen({
@@ -25,8 +27,10 @@ export function CravingScreen({
   onCellChange,
   onSelect,
   queueWaiting = 0,
+  onlineCount = 0,
 }: CravingScreenProps) {
   const geo = useGeoRegion(onRegionChange, onCellChange)
+  const mealNotify = useMealWindowNotify()
   const activeWindow = currentMealWindow()
   const next = nextMealWindow()
 
@@ -42,7 +46,11 @@ export function CravingScreen({
     >
       <div className="mb-6 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         <span className="glass rounded-full px-3 py-1.5">
-          {queueWaiting > 0 ? `${queueWaiting} waiting now` : 'Queue quiet — lunch & dinner windows work best'}
+          {onlineCount > 0
+            ? `${onlineCount} online · ${queueWaiting} waiting`
+            : queueWaiting > 0
+              ? `${queueWaiting} waiting now`
+              : 'Queue quiet — lunch & dinner windows work best'}
         </span>
         {activeWindow ? (
           <span className="rounded-full border border-success/30 bg-success/10 px-3 py-1.5 text-success">
@@ -52,6 +60,16 @@ export function CravingScreen({
           <span className="rounded-full border border-white/10 px-3 py-1.5">
             Next: {next.window.label} in {formatMinutesUntil(next.minutesUntil)} IST
           </span>
+        )}
+        {mealNotify.permission !== 'unsupported' && !activeWindow && (
+          <button
+            type="button"
+            onClick={() => (mealNotify.enabled ? mealNotify.disable() : mealNotify.enable())}
+            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 transition-colors hover:border-white/25 hover:text-foreground"
+          >
+            {mealNotify.enabled ? <BellOff className="size-3.5" /> : <Bell className="size-3.5" />}
+            {mealNotify.enabled ? 'Notify off' : 'Notify me'}
+          </button>
         )}
       </div>
 

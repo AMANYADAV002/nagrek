@@ -14,6 +14,7 @@ interface SiteHeaderProps {
   displayName?: string
   avatarUrl?: string | null
   queueWaiting?: number
+  onlineCount?: number
   onHome: () => void
   onSignOut?: () => void
   onSignIn?: () => void
@@ -29,6 +30,7 @@ export function SiteHeader({
   displayName,
   avatarUrl,
   queueWaiting = 0,
+  onlineCount = 0,
   onHome,
   onSignOut,
   onSignIn,
@@ -58,8 +60,9 @@ export function SiteHeader({
       </button>
 
       <div className="flex items-center gap-3">
-        {stage === 'select' || stage === 'matching' ? (
+        {stage === 'select' || stage === 'matching' || stage === 'hero' ? (
           <span className="glass hidden items-center rounded-full px-3 py-1.5 text-[11px] text-muted-foreground sm:inline-flex">
+            {onlineCount > 0 ? `${onlineCount} live · ` : ''}
             {queueWaiting} waiting
           </span>
         ) : null}

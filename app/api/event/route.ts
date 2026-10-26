@@ -17,8 +17,11 @@ const ALLOWED = new Set([
   'paid',
   'report_sent',
   'meal_window_view',
+  'meal_window_notify_on',
+  'meal_window_notify_fired',
   'referral_click',
   'rating_submitted',
+  'ambassador_apply',
 ])
 
 export async function POST(req: NextRequest) {

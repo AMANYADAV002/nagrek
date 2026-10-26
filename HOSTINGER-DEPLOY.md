@@ -125,10 +125,18 @@ Set these by name in the host dashboard (never commit secrets). Enter values you
 | `NAGREK_SKIP_PAYWALL` | Optional | Set `1` to skip paywall even if Razorpay keys exist |
 | `NEXT_PUBLIC_NAGREK_SKIP_PAYWALL` | Optional | Client-side mirror of the bypass |
 | `RAZORPAY_*` | Payment only | Leave unset to auto-bypass paywall until billing is live |
+| `CRON_SECRET` | Recommended | Protects `/api/cron/cleanup-inactive` (Bearer or `?secret=`) |
 
 Do **not** set `PORT` on Hostinger — the platform injects it.
 
 Apply SQL under `supabase/migrations/` in the Supabase SQL editor after owner approves **GATE-G1**.
+
+Weekly inactive dry-run (Hostinger cron or similar; defaults to dry-run unless `dry_run=false`):
+
+```bash
+curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
+  "https://yourdomain.com/api/cron/cleanup-inactive?dry_run=true"
+```
 
 ## Notes
 

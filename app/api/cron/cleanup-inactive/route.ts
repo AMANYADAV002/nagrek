@@ -1,8 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server'
 
+function authorized(req: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET
+  if (!secret) {
+    // Local/dev without secret: allow only dry-run so execute cannot run open.
+    const dryRun = req.nextUrl.searchParams.get('dry_run') !== 'false'
+    return dryRun && process.env.NODE_ENV !== 'production'
+  }
+  const header = req.headers.get('authorization')
+  if (header === `Bearer ${secret}`) return true
+  const query = req.nextUrl.searchParams.get('secret')
+  return query === secret
+}
+
 export async function GET(req: NextRequest) {
   try {
+    if (!authorized(req)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     const searchParams = req.nextUrl.searchParams
     const dryRun = searchParams.get('dry_run') !== 'false'
 
@@ -45,7 +62,6 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    // Execute mode
     let deleted = 0
     for (const c of candidates || []) {
       const { error: delError } = await supabase.auth.admin.deleteUser(c.id)

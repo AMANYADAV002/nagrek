@@ -144,6 +144,9 @@ export function HeroScreen({ onStart }: { onStart: () => void }) {
         <a href="/bengaluru" className="transition-colors hover:text-foreground">
           Bengaluru
         </a>
+        <a href="/ambassador" className="transition-colors hover:text-foreground">
+          Ambassadors
+        </a>
       </footer>
     </motion.section>
   )
