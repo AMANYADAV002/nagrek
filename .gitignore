@@ -14,3 +14,11 @@ __v0_jsx-dev-runtime.ts
 node_modules
 .next/
 .DS_Store
+
+# Never ship deploy archives from public/
+public/*.zip
+# Cursor local config: keep skills, never commit MCP secrets/API keys
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
+

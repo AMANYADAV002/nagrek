@@ -19,7 +19,7 @@ import { io, type Socket } from 'socket.io-client'
 import type { FoodId } from '@/lib/foods'
 import { GLOBAL_REGION } from '@/lib/regions'
 
-export type Stage = 'hero' | 'select' | 'matching' | 'video'
+export type Stage = 'hero' | 'auth' | 'onboarding' | 'paywall' | 'select' | 'matching' | 'video'
 export type Mode = 'live' | 'demo'
 export type SearchStatus = 'idle' | 'requesting-media' | 'connecting' | 'searching' | 'timeout'
 export type MediaIssue = 'denied' | 'unavailable' | 'insecure' | 'not-found' | null
@@ -31,6 +31,7 @@ export interface MatchState {
   partnerAccepted: boolean
   bothAccepted: boolean
   connected: boolean
+  partnerUserId?: string | null
 }
 
 /** Seconds to wait in an empty queue before offering retry / demo. */
@@ -47,7 +48,7 @@ function classifyMediaError(error: unknown): MediaIssue {
   return 'unavailable'
 }
 
-export function useNagrekSession() {
+export function useNagrekSession(getAccessToken?: () => Promise<string | null> | string | null) {
   const [stage, setStage] = useState<Stage>('hero')
   const [food, setFood] = useState<FoodId | null>(null)
   const [region, setRegion] = useState<string>(GLOBAL_REGION)
@@ -59,6 +60,10 @@ export function useNagrekSession() {
   const [match, setMatch] = useState<MatchState | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [socketConnected, setSocketConnected] = useState(false)
+  const [locationCell, setLocationCell] = useState<string | null>(null)
+  const [queueWaiting, setQueueWaiting] = useState(0)
+  const [onlineCount, setOnlineCount] = useState(0)
+  const [lastEndedMatchId, setLastEndedMatchId] = useState<string | null>(null)
 
   // Mutable refs so socket listeners never read stale React state.
   const socketRef = useRef<Socket | null>(null)
@@ -70,7 +75,9 @@ export function useNagrekSession() {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const demoTimersRef = useRef<ReturnType<typeof setTimeout>[]>([])
   const modeRef = useRef<Mode>('live')
-  const queueRef = useRef<{ food: FoodId; region: string } | null>(null)
+  const queueRef = useRef<{ food: FoodId; region: string; cell?: string | null } | null>(null)
+  const cellRef = useRef<string | null>(null)
+  cellRef.current = locationCell
 
   modeRef.current = mode
 
@@ -223,8 +230,19 @@ export function useNagrekSession() {
   const ensureSocket = useCallback(() => {
     if (socketRef.current) return socketRef.current
 
-    // Same-origin connection — no hardcoded URLs, works behind any domain.
-    const socket = io({ transports: ['websocket', 'polling'], reconnectionAttempts: 5 })
+    // Same-origin connection — passes token and refreshes on reconnect
+    const socket = io({
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 10,
+      auth: async (cb) => {
+        try {
+          const token = typeof getAccessToken === 'function' ? await getAccessToken() : null
+          cb({ token })
+        } catch {
+          cb({ token: null })
+        }
+      },
+    })
     socketRef.current = socket
 
     socket.on('connect', () => {
@@ -241,12 +259,22 @@ export function useNagrekSession() {
       if (Array.isArray(iceServers) && iceServers.length) iceServersRef.current = iceServers
     })
 
-    socket.on('queued', () => {
+    socket.on('queued', (payload?: { globalWaiting?: number }) => {
       if (modeRef.current !== 'live') return
       setStatus((s) => (s === 'timeout' ? s : 'searching'))
+      if (typeof payload?.globalWaiting === 'number') setQueueWaiting(payload.globalWaiting)
     })
 
-    socket.on('match-found', async ({ roomId, initiator }: { roomId: string; initiator: boolean }) => {
+    socket.on('queue-stats', (payload: { waiting?: number; online?: number }) => {
+      if (typeof payload.waiting === 'number') setQueueWaiting(payload.waiting)
+      if (typeof payload.online === 'number') setOnlineCount(payload.online)
+    })
+
+    socket.on('search-widened', () => {
+      flash('Widening search to your region…')
+    })
+
+    socket.on('match-found', async ({ roomId, initiator, partnerUserId }: { roomId: string; initiator: boolean; partnerUserId?: string | null }) => {
       if (modeRef.current !== 'live') return
       clearSearchTimer()
       destroyPeer()
@@ -258,6 +286,7 @@ export function useNagrekSession() {
         partnerAccepted: false,
         bothAccepted: false,
         connected: false,
+        partnerUserId: partnerUserId || null,
       })
       setStage('video')
 
@@ -332,15 +361,35 @@ export function useNagrekSession() {
       armSearchTimer()
     }
 
-    socket.on('match-ended', ({ reason, byPartner }: { reason: string; byPartner: boolean }) => {
+    socket.on('match-ended', ({ reason, byPartner, matchId }: { reason: string; byPartner: boolean; matchId?: string }) => {
+      if (matchId) setLastEndedMatchId(matchId)
+      if (reason === 'ended' || reason === 'complete') {
+        destroyPeer()
+        setStage('select')
+        setStatus('idle')
+        flash('Call ended. Rate how it went if you like.')
+        return
+      }
       if (reason === 'timeout') backToQueue('Time ran out — back in the queue.')
       else if (reason === 'failed') backToQueue('Could not connect — back in the queue.')
       else backToQueue(byPartner ? 'They skipped — finding someone new.' : 'Skipped — finding someone new.')
     })
 
-    socket.on('partner-left', () => backToQueue('Your partner left — back in the queue.'))
+    socket.on('partner-left', (payload?: { matchId?: string }) => {
+      if (payload?.matchId) setLastEndedMatchId(payload.matchId)
+      backToQueue('Your partner left — back in the queue.')
+    })
 
-    socket.on('error-message', ({ message }: { message: string }) => flash(message))
+    socket.on('error-message', (payload: { code?: string; message?: string } | string) => {
+      if (typeof payload === 'object' && payload.code === 'PAYMENT_REQUIRED') {
+        destroyPeer()
+        setStage('paywall')
+        flash('Active membership required to join live matchmaking.')
+        return
+      }
+      const msg = typeof payload === 'string' ? payload : payload.message || (payload.code ? `[${payload.code}] Rate limit reached` : 'Error')
+      flash(msg)
+    })
 
     return socket
   }, [armSearchTimer, clearSearchTimer, createPeer, destroyPeer, flash, flushPendingIce])
@@ -391,7 +440,7 @@ export function useNagrekSession() {
 
       setStatus('connecting')
       const socket = ensureSocket()
-      queueRef.current = { food: selectedFood, region }
+      queueRef.current = { food: selectedFood, region, cell: cellRef.current }
       socket.emit('join-queue', queueRef.current)
       if (socket.connected) setStatus('searching')
       armSearchTimer()
@@ -410,10 +459,31 @@ export function useNagrekSession() {
     modeRef.current = 'live'
     setStatus('searching')
     const socket = ensureSocket()
-    queueRef.current = { food, region }
+    queueRef.current = { food, region, cell: cellRef.current }
     socket.emit('join-queue', queueRef.current)
     armSearchTimer()
   }, [armSearchTimer, begin, clearDemoTimers, ensureSocket, food, region])
+
+  const callFriend = useCallback(
+    async (friendId: string) => {
+      setMode('live')
+      modeRef.current = 'live'
+      setStage('matching')
+      setStatus('requesting-media')
+      const stream = await acquireMedia()
+      if (!stream) {
+        flash('Camera needed for a friend call.')
+        setStage('select')
+        return
+      }
+      setStatus('connecting')
+      const socket = ensureSocket()
+      socket.emit('friend:call', { friendId })
+      setStatus('searching')
+      flash('Calling friend…')
+    },
+    [acquireMedia, ensureSocket, flash],
+  )
 
   const switchToDemo = useCallback(() => {
     socketRef.current?.emit('leave-queue')
@@ -453,6 +523,57 @@ export function useNagrekSession() {
     [armSearchTimer, clearDemoTimers, destroyPeer, flash, match, startDemoMatch],
   )
 
+  const reportPartner = useCallback(
+    async (reason: string) => {
+      if (!match) return
+      try {
+        const token = typeof getAccessToken === 'function' ? await getAccessToken() : null
+        if (token) {
+          await fetch('/api/report', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              reported_id: match.partnerUserId,
+              match_id: match.roomId,
+              reason,
+            }),
+          })
+        }
+      } catch (err) {
+        console.error('[nagrek] Report partner error:', err)
+      }
+      flash('Report submitted. Thank you for keeping Nagrek safe.')
+      skip('skip')
+    },
+    [flash, getAccessToken, match, skip],
+  )
+
+  const blockPartner = useCallback(async () => {
+    if (!match) return
+    try {
+      const token = typeof getAccessToken === 'function' ? await getAccessToken() : null
+      if (token && match.partnerUserId) {
+        await fetch('/api/block', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            blocked_id: match.partnerUserId,
+          }),
+        })
+      }
+    } catch (err) {
+      console.error('[nagrek] Block partner error:', err)
+    }
+    flash('User blocked. You will never be matched with them again.')
+    skip('skip')
+  }, [flash, getAccessToken, match, skip])
+
   /** Leave matching/video and go back to the craving selector. */
   const changeCraving = useCallback(() => {
     socketRef.current?.emit('leave-queue')
@@ -472,6 +593,9 @@ export function useNagrekSession() {
   }, [changeCraving, stopLocalMedia])
 
   const start = useCallback(() => setStage('select'), [])
+  const goToAuth = useCallback(() => setStage('auth'), [])
+  const goToOnboarding = useCallback(() => setStage('onboarding'), [])
+  const goToPaywall = useCallback(() => setStage('paywall'), [])
 
   // Full cleanup on unmount (tab close / navigation).
   useEffect(() => {
@@ -487,9 +611,12 @@ export function useNagrekSession() {
 
   return {
     stage,
+    setStage,
     food,
     region,
     setRegion,
+    locationCell,
+    setLocationCell,
     mode,
     status,
     mediaIssue,
@@ -498,7 +625,26 @@ export function useNagrekSession() {
     match,
     notice,
     socketConnected,
-    actions: { start, begin, retrySearch, switchToDemo, accept, skip, changeCraving, goHome },
+    queueWaiting,
+    onlineCount,
+    lastEndedMatchId,
+    setLastEndedMatchId,
+    actions: {
+      start,
+      goToAuth,
+      goToOnboarding,
+      goToPaywall,
+      begin,
+      retrySearch,
+      switchToDemo,
+      accept,
+      skip,
+      reportPartner,
+      blockPartner,
+      callFriend,
+      changeCraving,
+      goHome,
+    },
   }
 }
 

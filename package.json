@@ -4,16 +4,17 @@
   "private": true,
   "description": "Nagrek — Never Eat Alone. Location-based food-matching live video.",
   "main": "server.js",
-  "packageManager": "pnpm@12.3.4",
   "engines": {
     "node": ">=20.9.0"
   },
   "scripts": {
-    "dev": "NODE_ENV=development node server.js",
+    "dev": "node server.js --dev",
     "build": "next build",
-    "start": "node server.js"
+    "start": "node server.js",
+    "cleanup:inactive": "node scripts/cleanup-inactive-accounts.js --dry-run"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24.10.4",
     "@types/react": "^19.3.0",

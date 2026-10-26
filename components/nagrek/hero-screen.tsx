@@ -5,8 +5,10 @@ import { ArrowRight } from 'lucide-react'
 import Image from 'next/image'
 import { useEffect } from 'react'
 import { FOODS } from '@/lib/foods'
+import { FaqSection } from './faq-section'
 import { MagneticButton } from './magnetic-button'
 import { SplitReveal } from './split-reveal'
+import { WaitlistForm } from './waitlist-form'
 
 const FLOAT_POSITIONS = [
   'left-[4%] top-[18%] md:left-[8%] md:top-[20%]',
@@ -48,7 +50,7 @@ export function HeroScreen({ onStart }: { onStart: () => void }) {
       exit={{ opacity: 0, scale: 0.96, filter: 'blur(10px)' }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
     >
-      {FOODS.map((food, i) => (
+      {FOODS.slice(0, 4).map((food, i) => (
         <motion.div
           key={food.id}
           className={`absolute hidden sm:block ${FLOAT_POSITIONS[i]}`}
@@ -76,7 +78,7 @@ export function HeroScreen({ onStart }: { onStart: () => void }) {
           className="glass mb-8 inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground"
         >
           <span className="size-1.5 rounded-full bg-primary" aria-hidden="true" />
-          Live food matching
+          Shared cravings · real people
         </motion.p>
 
         <h1 id="hero-title" className="text-balance text-[clamp(3.5rem,13vw,10.5rem)] font-semibold leading-[0.88] tracking-[-0.05em]">
@@ -90,20 +92,21 @@ export function HeroScreen({ onStart }: { onStart: () => void }) {
           transition={{ delay: 1.1, duration: 0.8 }}
           className="mt-8 max-w-md text-pretty text-base leading-relaxed text-muted-foreground md:text-lg"
         >
-          Tell us what you&apos;re craving. We&apos;ll find someone nearby who wants the same thing — and you share
-          the meal over live video.
+          Pick what you&apos;re craving. When someone nearby wants the same, you meet over a 1-on-1 video call.
+          Empty queue? Try Demo — always labeled, never sold as a real person.
         </motion.p>
 
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 1.3, duration: 0.8 }}
-          className="mt-10"
+          className="mt-10 flex flex-col items-center gap-4"
         >
           <MagneticButton size="xl" onClick={onStart} className="group">
             Find a meal buddy
             <ArrowRight className="size-5 transition-transform duration-300 group-hover:translate-x-1" aria-hidden="true" />
           </MagneticButton>
+          <WaitlistForm source="hero" cityPlaceholder="Bengaluru?" />
         </motion.div>
 
         <motion.ol
@@ -120,6 +123,28 @@ export function HeroScreen({ onStart }: { onStart: () => void }) {
           ))}
         </motion.ol>
       </div>
+
+      <div className="relative z-10 mt-24 w-full">
+        <FaqSection />
+      </div>
+
+      <footer className="relative z-10 mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 pb-10 text-xs text-muted-foreground">
+        <a href="/privacy" className="transition-colors hover:text-foreground">
+          Privacy
+        </a>
+        <a href="/terms" className="transition-colors hover:text-foreground">
+          Terms
+        </a>
+        <a href="/guidelines" className="transition-colors hover:text-foreground">
+          Guidelines
+        </a>
+        <a href="/refund" className="transition-colors hover:text-foreground">
+          Refunds
+        </a>
+        <a href="/bengaluru" className="transition-colors hover:text-foreground">
+          Bengaluru
+        </a>
+      </footer>
     </motion.section>
   )
 }
