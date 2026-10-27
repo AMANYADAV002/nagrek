@@ -1,5 +1,4 @@
-import { Shield } from 'lucide-react'
-import { LegalCallout, LegalSection, LegalShell } from '@/components/nagrek/legal-shell'
+﻿import { LegalCallout, LegalSection, LegalShell } from '@/components/nagrek/legal-shell'
 
 export const metadata = {
   title: 'Terms of Service | Nagrek',
@@ -11,7 +10,6 @@ export default function TermsPage() {
     <LegalShell
       activePath="/terms"
       eyebrow="Legal & Terms"
-      icon={Shield}
       title="Terms of Service"
       subtitle="Last updated: October 2026 · Plain language edition for adults sharing meals on video."
     >
@@ -73,3 +71,4 @@ export default function TermsPage() {
     </LegalShell>
   )
 }
+

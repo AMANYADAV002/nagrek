@@ -95,6 +95,12 @@ export function NagrekApp() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: 'start_click' }),
     }).catch(() => {})
+    // No Supabase → auto guest so video + friends work locally without keys
+    if (!auth.isConfigured && !auth.user) {
+      auth.signInAsGuest()
+      actions.start()
+      return
+    }
     if (!auth.user && mode !== 'demo') {
       actions.goToAuth()
     } else if (auth.user && auth.profile?.banned_at && mode !== 'demo') {
@@ -106,7 +112,7 @@ export function NagrekApp() {
     } else {
       actions.start()
     }
-  }, [auth.user, auth.profile?.banned_at, auth.needsProfile, needsPaywall, mode, actions])
+  }, [auth, needsPaywall, mode, actions])
 
   const handleProfileComplete = useCallback(
     async ({

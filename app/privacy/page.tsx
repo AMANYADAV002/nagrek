@@ -1,5 +1,4 @@
-import { Lock, Mail, ShieldCheck } from 'lucide-react'
-import { LegalCallout, LegalSection, LegalShell } from '@/components/nagrek/legal-shell'
+﻿import { LegalCallout, LegalSection, LegalShell } from '@/components/nagrek/legal-shell'
 
 export const metadata = {
   title: 'Privacy Policy | Nagrek',
@@ -12,21 +11,20 @@ export default function PrivacyPage() {
     <LegalShell
       activePath="/privacy"
       eyebrow="Privacy & Data"
-      icon={Lock}
       title="Privacy Policy"
       subtitle="Plain language · No fine-print surprises · Data contact: privacy@nagrek.com"
     >
       <LegalSection title="1. Core Privacy Commitments">
         <div className="grid gap-3 sm:grid-cols-2">
           <LegalCallout>
-            <ShieldCheck className="size-5 text-success" />
+            <span className="mb-1 inline-block size-2 rounded-full bg-accent" aria-hidden="true" />
             <h3 className="mt-2 text-xs font-semibold text-foreground">Video calls are never recorded</h3>
             <p className="mt-1 text-xs">
               Streams are peer-to-peer WebRTC. We never record, process, or store your camera or microphone feeds.
             </p>
           </LegalCallout>
           <LegalCallout>
-            <ShieldCheck className="size-5 text-accent" />
+            <span className="mb-1 inline-block size-2 rounded-full bg-accent" aria-hidden="true" />
             <h3 className="mt-2 text-xs font-semibold text-foreground">No exact GPS coordinates</h3>
             <p className="mt-1 text-xs">
               We store a coarse 0.1° grid cell (~10 km). Your exact street or restaurant location is never saved.
@@ -90,7 +88,6 @@ export default function PrivacyPage() {
 
       <LegalSection title="6. Contact Our Data Team">
         <p className="flex flex-wrap items-center gap-2">
-          <Mail className="size-4 text-accent" />
           DPDP / privacy requests:{' '}
           <a href="mailto:privacy@nagrek.com" className="font-medium text-foreground underline-offset-4 hover:underline">
             privacy@nagrek.com
@@ -100,3 +97,4 @@ export default function PrivacyPage() {
     </LegalShell>
   )
 }
+

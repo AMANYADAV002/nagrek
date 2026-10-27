@@ -74,8 +74,33 @@ function buildIceServers() {
       credential: TURN_CREDENTIAL || undefined,
     })
   } else {
+    // Public Open Relay test TURN so phone (mobile data) can reach a laptop.
+    // Shared, rate-limited, not for production scale — set TURN_* for your own server.
+    iceServers.push(
+      { urls: 'stun:stun.relay.metered.ca:80' },
+      {
+        urls: 'turn:global.relay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:global.relay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+    )
     console.warn(
-      '[nagrek] TURN_URL is not set. WebRTC will fail for many users on mobile data or strict NATs. Set TURN_URL, TURN_USERNAME and TURN_CREDENTIAL.',
+      '[nagrek] Using public Open Relay TURN (test only). Set TURN_URL, TURN_USERNAME, TURN_CREDENTIAL for your own server.',
     )
   }
   return iceServers
@@ -190,10 +215,16 @@ async function persistMatch(room, outcome) {
   }
 }
 
+function areLocalFriendsInMemory(userA, userB) {
+  const g = globalThis.__nagrekLocalFriends
+  if (!g?.accepted) return false
+  return Boolean(g.accepted.get(userA)?.has(userB))
+}
+
 async function areFriends(userA, userB) {
   if (!userA || !userB) return false
   const admin = getSupabaseAdmin()
-  if (!admin) return false
+  if (!admin) return areLocalFriendsInMemory(userA, userB)
   try {
     const { data } = await admin
       .from('friendships')
@@ -442,6 +473,7 @@ app
     // Socket auth middleware: verify Supabase JWT, attach userId, check ban & age
     io.use(async (socket, next) => {
       const token = socket.handshake.auth?.token
+      const localUserId = socket.handshake.auth?.localUserId
       if (!token) {
         return next(new Error('Authentication required. Missing token.'))
       }
@@ -479,11 +511,13 @@ app
           return next(new Error('Authentication failed.'))
         }
       } else {
-        // Fallback for demo / development without Supabase keys
-        if (token === 'dev-guest-token' || token.startsWith('mock-')) {
-          socket.data.userId = 'guest-' + socket.id
+        // Local / offline mode (no Supabase): stable localUserId for friends + video
+        const stable =
+          typeof localUserId === 'string' && /^local_[a-z0-9]{10,}$/.test(localUserId) ? localUserId : null
+        if (token === 'dev-guest-token' || token.startsWith('mock-') || token.startsWith('local-')) {
+          socket.data.userId = stable || 'guest-' + socket.id
         } else {
-          socket.data.userId = 'user-' + socket.id
+          socket.data.userId = stable || 'user-' + socket.id
         }
       }
       next()

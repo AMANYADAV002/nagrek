@@ -1,5 +1,4 @@
-import { AlertOctagon, HeartHandshake, ShieldAlert, Sparkles, UserCheck } from 'lucide-react'
-import { LegalCallout, LegalSection, LegalShell } from '@/components/nagrek/legal-shell'
+﻿import { LegalCallout, LegalSection, LegalShell } from '@/components/nagrek/legal-shell'
 
 export const metadata = {
   title: 'Community Guidelines | Nagrek',
@@ -11,18 +10,17 @@ export default function GuidelinesPage() {
     <LegalShell
       activePath="/guidelines"
       eyebrow="Respect & Safety"
-      icon={HeartHandshake}
       title="Community Guidelines"
       subtitle="Rules that keep meal connections spontaneous, respectful, and safe."
     >
-      <LegalSection title="1. Strictly 18+ only" icon={UserCheck}>
+      <LegalSection title="1. Strictly 18+ only">
         <p>
           Nagrek is exclusively for adults. If you suspect someone in a call is a minor, use <strong>Report</strong>{' '}
           immediately. Minor accounts are banned permanently.
         </p>
       </LegalSection>
 
-      <LegalSection title="2. What is never allowed" icon={AlertOctagon}>
+      <LegalSection title="2. What is never allowed">
         <ul className="list-disc space-y-1.5 pl-5">
           <li>
             <strong className="text-foreground">Nudity or sexual behavior</strong>
@@ -42,7 +40,7 @@ export default function GuidelinesPage() {
         </ul>
       </LegalSection>
 
-      <LegalSection title="3. Empowering your safety" icon={ShieldAlert}>
+      <LegalSection title="3. Empowering your safety">
         <div className="space-y-3">
           <LegalCallout>
             <p className="text-xs font-semibold text-foreground">Blurred accept phase</p>
@@ -59,7 +57,7 @@ export default function GuidelinesPage() {
         </div>
       </LegalSection>
 
-      <LegalSection title="4. Appeals process" icon={Sparkles}>
+      <LegalSection title="4. Appeals process">
         <p>
           Believe a ban was a mistake? Email{' '}
           <a href="mailto:appeals@nagrek.com" className="font-semibold text-accent underline-offset-4 hover:underline">
@@ -71,3 +69,4 @@ export default function GuidelinesPage() {
     </LegalShell>
   )
 }
+

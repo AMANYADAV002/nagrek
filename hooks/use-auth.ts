@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AuthError, Session, User } from '@supabase/supabase-js'
 import { getSupabaseBrowserClient, isSupabaseConfigured } from '@/lib/supabase/browser'
+import { getOrCreateLocalUserId, readLocalProfile, writeLocalProfile } from '@/lib/local-guest'
 
 export interface Profile {
   id: string
@@ -107,10 +108,14 @@ export function useAuth() {
   }, [])
 
   const signInAsGuest = useCallback(() => {
+    const localId = getOrCreateLocalUserId()
+    const saved = readLocalProfile()
+    const username = saved?.username || `foodie_${localId.slice(-4)}`
+    const display_name = saved?.display_name || 'Foodie Explorer'
     const guestUser = {
-      id: 'dev-guest-user',
+      id: localId,
       email: 'guest@nagrek.local',
-      user_metadata: { full_name: 'Foodie Explorer', name: 'Foodie Explorer' },
+      user_metadata: { full_name: display_name, name: display_name, username },
       app_metadata: {},
       aud: 'authenticated',
       created_at: new Date().toISOString(),
@@ -119,17 +124,17 @@ export function useAuth() {
     setUser(guestUser)
     setSession({ access_token: 'dev-guest-token' } as unknown as Session)
     setProfile({
-      id: 'dev-guest-user',
-      username: 'foodie',
-      display_name: 'Foodie Explorer',
-      avatar_url: null,
+      id: localId,
+      username,
+      display_name,
+      avatar_url: saved?.avatar_url ?? null,
       age_confirmed_at: new Date().toISOString(),
       location_cell: null,
       location_updated_at: null,
-      instagram: null,
-      snapchat: null,
-      facebook: null,
-      linkedin: null,
+      instagram: saved?.instagram ?? null,
+      snapchat: saved?.snapchat ?? null,
+      facebook: saved?.facebook ?? null,
+      linkedin: saved?.linkedin ?? null,
       role: 'user',
       banned_at: null,
       ban_reason: null,
@@ -153,7 +158,21 @@ export function useAuth() {
     async (updates: Partial<Omit<Profile, 'id' | 'created_at'>>) => {
       if (!user) return { error: new Error('Not signed in') }
       if (!isSupabaseConfigured) {
-        setProfile((prev) => (prev ? { ...prev, ...updates } : null))
+        setProfile((prev) => {
+          const next = prev ? { ...prev, ...updates } : null
+          if (next) {
+            writeLocalProfile({
+              username: next.username || 'foodie',
+              display_name: next.display_name || 'Foodie Explorer',
+              avatar_url: next.avatar_url,
+              instagram: next.instagram,
+              snapchat: next.snapchat,
+              facebook: next.facebook,
+              linkedin: next.linkedin,
+            })
+          }
+          return next
+        })
         return { error: null }
       }
       const supabase = getSupabaseBrowserClient()

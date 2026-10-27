@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowLeft, type LucideIcon } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { fadeUp, staggerContainer, staggerItem } from '@/lib/motion'
 import { Badge } from '@/components/ui/badge'
@@ -14,16 +14,15 @@ const LEGAL_NAV = [
   { href: '/refund', label: 'Refunds' },
 ]
 
+/** Client-safe shell — do not pass Lucide component refs from Server Components. */
 export function LegalShell({
   eyebrow,
-  icon: Icon,
   title,
   subtitle,
   children,
   activePath,
 }: {
   eyebrow: string
-  icon: LucideIcon
   title: string
   subtitle: string
   children: React.ReactNode
@@ -68,10 +67,7 @@ export function LegalShell({
           </motion.div>
 
           <motion.header variants={fadeUp} className="space-y-4 border-b border-white/10 pb-8">
-            <Badge variant="sunset">
-              <Icon className="size-3.5" />
-              {eyebrow}
-            </Badge>
+            <Badge variant="sunset">{eyebrow}</Badge>
             <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-5xl">
               {title.split(' ').slice(0, -1).join(' ')}{' '}
               <span className="font-serif font-normal italic text-sunset">{title.split(' ').slice(-1)}</span>
@@ -79,7 +75,10 @@ export function LegalShell({
             <p className="max-w-xl text-sm leading-relaxed text-muted-foreground md:text-base">{subtitle}</p>
           </motion.header>
 
-          <motion.div variants={fadeUp} className="prose-legal space-y-6 text-sm leading-relaxed text-muted-foreground md:text-[15px]">
+          <motion.div
+            variants={fadeUp}
+            className="prose-legal space-y-6 text-sm leading-relaxed text-muted-foreground md:text-[15px]"
+          >
             {children}
           </motion.div>
         </motion.div>
@@ -88,21 +87,10 @@ export function LegalShell({
   )
 }
 
-export function LegalSection({
-  title,
-  icon: Icon,
-  children,
-}: {
-  title: string
-  icon?: LucideIcon
-  children: React.ReactNode
-}) {
+export function LegalSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="glass-soft rounded-3xl p-5 md:p-6">
-      <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-foreground">
-        {Icon ? <Icon className="size-5 shrink-0 text-accent" /> : null}
-        {title}
-      </h2>
+      <h2 className="mb-3 text-lg font-semibold text-foreground">{title}</h2>
       <div className="space-y-3">{children}</div>
     </section>
   )

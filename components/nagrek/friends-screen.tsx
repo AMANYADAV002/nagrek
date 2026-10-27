@@ -4,7 +4,28 @@ import { useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Check, Loader2, Phone, Search, UserPlus, Users, X } from 'lucide-react'
 import { SOCIAL_LABELS, socialHref } from '@/lib/social-links'
+import { getOrCreateLocalUserId, readLocalProfile } from '@/lib/local-guest'
+import { isSupabaseConfigured } from '@/lib/supabase/browser'
 import { MagneticButton } from './magnetic-button'
+
+function localHeaders(token: string | null): HeadersInit {
+  const h: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+  if (!isSupabaseConfigured) {
+    const id = getOrCreateLocalUserId()
+    const p = readLocalProfile()
+    h['x-nagrek-local-user-id'] = id
+    if (p?.username) h['x-nagrek-username'] = p.username
+    if (p?.display_name) h['x-nagrek-display'] = p.display_name
+    if (p?.instagram) h['x-nagrek-instagram'] = p.instagram
+    if (p?.snapchat) h['x-nagrek-snapchat'] = p.snapchat
+    if (p?.facebook) h['x-nagrek-facebook'] = p.facebook
+    if (p?.linkedin) h['x-nagrek-linkedin'] = p.linkedin
+  }
+  return h
+}
 
 type FriendshipRow = {
   id: string
@@ -46,7 +67,7 @@ export function FriendsScreen({
     try {
       const token = await getAccessToken()
       if (!token) return
-      const res = await fetch('/api/friends', { headers: { Authorization: `Bearer ${token}` } })
+      const res = await fetch('/api/friends', { headers: localHeaders(token) })
       if (res.ok) {
         const data = await res.json()
         setRows(data.friendships || [])
@@ -69,7 +90,7 @@ export function FriendsScreen({
       const token = await getAccessToken()
       if (!token) return
       const res = await fetch(`/api/friends/search?q=${encodeURIComponent(query.trim())}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: localHeaders(token),
       })
       if (res.ok) {
         const data = await res.json()
@@ -86,7 +107,7 @@ export function FriendsScreen({
     try {
       await fetch('/api/friends', {
         method,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: localHeaders(token),
         body: JSON.stringify(body),
       })
       await load()

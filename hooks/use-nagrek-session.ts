@@ -237,7 +237,13 @@ export function useNagrekSession(getAccessToken?: () => Promise<string | null> |
       auth: async (cb) => {
         try {
           const token = typeof getAccessToken === 'function' ? await getAccessToken() : null
-          cb({ token })
+          let localUserId: string | null = null
+          try {
+            localUserId = localStorage.getItem('nagrek_local_user_id')
+          } catch {
+            /* ignore */
+          }
+          cb({ token, localUserId })
         } catch {
           cb({ token: null })
         }
