@@ -16,6 +16,7 @@ interface MatchingScreenProps {
   status: SearchStatus
   mediaIssue: MediaIssue
   localStream: MediaStream | null
+  queueWaiting?: number
   onRetry: () => void
   onDemo: () => void
   onBack: () => void
@@ -44,6 +45,7 @@ export function MatchingScreen({
   status,
   mediaIssue,
   localStream,
+  queueWaiting = 0,
   onRetry,
   onDemo,
   onBack,
@@ -75,8 +77,10 @@ export function MatchingScreen({
       : status === 'connecting'
         ? 'Connecting to the Nagrek server…'
         : timedOut
-          ? `Nobody in ${region} is craving ${food.label.toLowerCase()} right now. Try again, or preview with a demo partner.`
-          : `Someone in ${region} who's also craving ${food.label.toLowerCase()}.`
+          ? `Nobody in ${region} is craving ${food.label.toLowerCase()} right now. Try again, or preview with a clearly labeled Demo partner.`
+          : `Someone in ${region} who's also craving ${food.label.toLowerCase()}.${
+              queueWaiting > 0 ? ` ${queueWaiting} people waiting.` : ''
+            }`
 
   return (
     <motion.section

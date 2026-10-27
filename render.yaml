@@ -1,0 +1,15 @@
+# GitHub → Render. GitHub Pages cannot run Socket.io.
+# https://render.com → New → Blueprint → this repo.
+services:
+  - type: web
+    name: nagrek
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production

@@ -7,11 +7,12 @@ interface VideoTileProps {
   stream: MediaStream | null
   muted?: boolean
   mirrored?: boolean
+  blurred?: boolean
   label: string
   className?: string
 }
 
-export function VideoTile({ stream, muted = false, mirrored = false, label, className }: VideoTileProps) {
+export function VideoTile({ stream, muted = false, mirrored = false, blurred = false, label, className }: VideoTileProps) {
   const ref = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
@@ -32,7 +33,12 @@ export function VideoTile({ stream, muted = false, mirrored = false, label, clas
       playsInline
       muted={muted}
       aria-label={label}
-      className={cn('size-full bg-muted object-cover', mirrored && '-scale-x-100', className)}
+      className={cn(
+        'size-full bg-muted object-cover transition-[filter,transform] duration-700 ease-out',
+        mirrored && '-scale-x-100',
+        blurred && 'scale-105 blur-2xl brightness-90 saturate-75',
+        className,
+      )}
     />
   )
 }

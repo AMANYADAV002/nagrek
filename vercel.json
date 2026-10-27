@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/cleanup-inactive?dry_run=true",
+      "schedule": "0 3 * * 1"
+    }
+  ]
+}
