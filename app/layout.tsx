@@ -1,12 +1,12 @@
 import type { Metadata, Viewport } from 'next'
-import { Geist, Instrument_Serif } from 'next/font/google'
+import { Fraunces, Outfit } from 'next/font/google'
 import { PwaRegister } from '@/components/nagrek/pwa-register'
 import './globals.css'
 
-const geist = Geist({ subsets: ['latin'], variable: '--font-geist', display: 'swap' })
-const instrument = Instrument_Serif({
+const outfit = Outfit({ subsets: ['latin'], variable: '--font-geist', display: 'swap' })
+const fraunces = Fraunces({
   subsets: ['latin'],
-  weight: '400',
+  weight: ['400', '600'],
   style: ['normal', 'italic'],
   variable: '--font-instrument',
   display: 'swap',
@@ -48,7 +48,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`${geist.variable} ${instrument.variable} bg-background`}>
+    <html lang="en" className={`${outfit.variable} ${fraunces.variable} bg-background`}>
       <body>
         {children}
         <PwaRegister />

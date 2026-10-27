@@ -27,6 +27,10 @@ interface ProfileSetupScreenProps {
     displayName: string
     avatarUrl: string | null
     ageConfirmed: boolean
+    instagram: string | null
+    snapchat: string | null
+    facebook: string | null
+    linkedin: string | null
   }) => Promise<void>
 }
 
@@ -36,6 +40,10 @@ export function ProfileSetupScreen({ defaultName = '', defaultUsername = '', onC
     defaultUsername || defaultName.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20),
   )
   const [avatarUrl, setAvatarUrl] = useState<string | null>(AVATAR_PRESETS[0])
+  const [instagram, setInstagram] = useState('')
+  const [snapchat, setSnapchat] = useState('')
+  const [facebook, setFacebook] = useState('')
+  const [linkedin, setLinkedin] = useState('')
   const [ageConfirmed, setAgeConfirmed] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -67,6 +75,10 @@ export function ProfileSetupScreen({ defaultName = '', defaultUsername = '', onC
         displayName: cleanDisplay,
         avatarUrl,
         ageConfirmed: true,
+        instagram: instagram.trim().replace(/^@/, '') || null,
+        snapchat: snapchat.trim().replace(/^@/, '') || null,
+        facebook: facebook.trim().replace(/^@/, '') || null,
+        linkedin: linkedin.trim().replace(/^@/, '') || null,
       })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save profile. Try another username.')
@@ -164,6 +176,44 @@ export function ProfileSetupScreen({ defaultName = '', defaultUsername = '', onC
                     maxLength={24}
                     required
                     className="pl-8"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs font-medium text-foreground">Social handles (optional)</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Shared only with friends after both of you accept — so you can stay in touch on Insta / Snap / FB /
+                  LinkedIn.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input
+                    value={instagram}
+                    onChange={(e) => setInstagram(e.target.value)}
+                    placeholder="Instagram"
+                    aria-label="Instagram"
+                    maxLength={80}
+                  />
+                  <Input
+                    value={snapchat}
+                    onChange={(e) => setSnapchat(e.target.value)}
+                    placeholder="Snapchat"
+                    aria-label="Snapchat"
+                    maxLength={80}
+                  />
+                  <Input
+                    value={facebook}
+                    onChange={(e) => setFacebook(e.target.value)}
+                    placeholder="Facebook"
+                    aria-label="Facebook"
+                    maxLength={120}
+                  />
+                  <Input
+                    value={linkedin}
+                    onChange={(e) => setLinkedin(e.target.value)}
+                    placeholder="LinkedIn"
+                    aria-label="LinkedIn"
+                    maxLength={120}
                   />
                 </div>
               </div>

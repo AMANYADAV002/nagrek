@@ -1,7 +1,7 @@
 'use client'
 
 import { AnimatePresence, motion } from 'framer-motion'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { CreditCard, LogOut, MapPin, User as UserIcon, Users } from 'lucide-react'
 import type { Mode, Stage } from '@/hooks/use-nagrek-session'
@@ -40,13 +40,17 @@ export function SiteHeader({
   const showStatus = stage === 'matching' || stage === 'video'
   const live = mode === 'live' && socketConnected
   const [menuOpen, setMenuOpen] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
 
   return (
-    <header className="fixed inset-x-0 top-0 z-50 flex items-center justify-between px-5 pt-[max(env(safe-area-inset-top),1.25rem)] md:px-10">
+    <header
+      className="fixed inset-x-0 top-0 z-50 flex items-center justify-between px-5 pt-5 md:px-10"
+      style={mounted ? { paddingTop: 'max(1.25rem, env(safe-area-inset-top, 0px))' } : undefined}
+    >
       <button
         type="button"
         onClick={onHome}
-        data-cursor="hover"
         className="group flex items-center gap-2.5 rounded-full py-1 pr-2 transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-4"
         aria-label="Nagrek — back to start"
       >

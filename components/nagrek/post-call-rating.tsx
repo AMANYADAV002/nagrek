@@ -52,11 +52,13 @@ export function PostCallRating({
         >
           <X className="size-4" />
         </button>
-        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-accent">After the call</p>
+        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-accent">Rate the conversation</p>
         <h2 id="post-call-rating-title" className="mt-2 text-xl font-semibold tracking-tight">
-          How was the meal chat?
+          How was that chat?
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">Optional — helps us improve matching.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Rate the conversation (1–5). Liked them? Add as friend next — then share Insta / Snap / FB / LinkedIn.
+        </p>
         <div className="mt-5 flex items-center justify-center gap-1">
           {[1, 2, 3, 4, 5].map((n) => (
             <button

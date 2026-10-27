@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { AnimatePresence, LayoutGroup, motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { Users } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import { useNagrekSession } from '@/hooks/use-nagrek-session'
@@ -12,7 +12,6 @@ import { AccountModal } from './account-modal'
 import { AuthScreen } from './auth-screen'
 import { BackgroundCanvas } from './background-canvas'
 import { CravingScreen } from './craving-screen'
-import { CursorFollower } from './cursor-follower'
 import { FriendsScreen } from './friends-screen'
 import { HeroScreen } from './hero-screen'
 import { MatchingScreen } from './matching-screen'
@@ -115,17 +114,29 @@ export function NagrekApp() {
       displayName,
       avatarUrl,
       ageConfirmed,
+      instagram,
+      snapchat,
+      facebook,
+      linkedin,
     }: {
       username: string
       displayName: string
       avatarUrl: string | null
       ageConfirmed: boolean
+      instagram: string | null
+      snapchat: string | null
+      facebook: string | null
+      linkedin: string | null
     }) => {
       const { error } = await auth.updateProfile({
         username,
         display_name: displayName,
         avatar_url: avatarUrl,
         age_confirmed_at: ageConfirmed ? new Date().toISOString() : null,
+        instagram,
+        snapchat,
+        facebook,
+        linkedin,
       })
       if (error) throw error
 
@@ -199,9 +210,8 @@ export function NagrekApp() {
   )
 
   return (
-    <div className="cursor-none-fine relative min-h-dvh">
-      <BackgroundCanvas intensity={stage === 'video' ? 0.5 : 1} />
-      <CursorFollower />
+    <div className="relative min-h-dvh">
+      <BackgroundCanvas intensity={stage === 'video' ? 0.35 : 0.7} />
       <SiteHeader
         stage={stage}
         mode={mode}
@@ -219,95 +229,93 @@ export function NagrekApp() {
       />
 
       <main>
-        <LayoutGroup>
-          <AnimatePresence mode="popLayout">
-            {stage === 'hero' && <HeroScreen key="hero" onStart={handleHeroStart} />}
-            {stage === 'auth' && (
-              <AuthScreen
-                key="auth"
-                onGoogle={auth.signInWithGoogle}
-                onEmail={auth.signInWithEmail}
-                onDemo={() => {
-                  actions.switchToDemo()
-                  actions.start()
-                }}
-                onBack={actions.goHome}
-                isConfigured={auth.isConfigured}
-                bannedNotice={
-                  auth.profile?.banned_at
-                    ? { reason: auth.profile.ban_reason || 'Violation of community safety policies' }
-                    : null
-                }
-              />
-            )}
-            {stage === 'onboarding' && (
-              <ProfileSetupScreen
-                key="onboarding"
-                defaultName={auth.user?.user_metadata?.full_name ?? auth.user?.user_metadata?.name ?? ''}
-                defaultUsername={auth.user?.user_metadata?.username ?? ''}
-                onComplete={handleProfileComplete}
-              />
-            )}
-            {stage === 'paywall' && (
-              <PaywallScreen
-                key="paywall"
-                onSubscribe={sub.subscribe}
-                onSuccess={async () => {
-                  await sub.checkStatus()
-                  actions.start()
-                }}
-                onDemo={() => {
-                  actions.switchToDemo()
-                  actions.start()
-                }}
-              />
-            )}
-            {stage === 'select' && (
-              <CravingScreen
-                key="select"
-                region={region}
-                onRegionChange={session.setRegion}
-                onCellChange={session.setLocationCell}
-                onSelect={actions.begin}
-                queueWaiting={session.queueWaiting}
-                onlineCount={session.onlineCount}
-              />
-            )}
-            {stage === 'matching' && food && (
-              <MatchingScreen
-                key="matching"
-                food={food}
-                region={region}
-                mode={mode}
-                status={status}
-                mediaIssue={session.mediaIssue}
-                localStream={session.localStream}
-                queueWaiting={session.queueWaiting}
-                onRetry={actions.retrySearch}
-                onDemo={actions.switchToDemo}
-                onBack={actions.changeCraving}
-              />
-            )}
-            {stage === 'video' && food && match && (
-              <VideoScreen
-                key="video"
-                food={food}
-                region={region}
-                mode={mode}
-                match={match}
-                localStream={session.localStream}
-                remoteStream={session.remoteStream}
-                onAccept={actions.accept}
-                onSkip={actions.skip}
-                onLeave={actions.changeCraving}
-                onReport={actions.reportPartner}
-                onBlock={actions.blockPartner}
-                onAddFriend={handleAddFriend}
-                onRate={handleRate}
-              />
-            )}
-          </AnimatePresence>
-        </LayoutGroup>
+        <AnimatePresence mode="wait">
+          {stage === 'hero' && <HeroScreen key="hero" onStart={handleHeroStart} />}
+          {stage === 'auth' && (
+            <AuthScreen
+              key="auth"
+              onGoogle={auth.signInWithGoogle}
+              onEmail={auth.signInWithEmail}
+              onDemo={() => {
+                actions.switchToDemo()
+                actions.start()
+              }}
+              onBack={actions.goHome}
+              isConfigured={auth.isConfigured}
+              bannedNotice={
+                auth.profile?.banned_at
+                  ? { reason: auth.profile.ban_reason || 'Violation of community safety policies' }
+                  : null
+              }
+            />
+          )}
+          {stage === 'onboarding' && (
+            <ProfileSetupScreen
+              key="onboarding"
+              defaultName={auth.user?.user_metadata?.full_name ?? auth.user?.user_metadata?.name ?? ''}
+              defaultUsername={auth.user?.user_metadata?.username ?? ''}
+              onComplete={handleProfileComplete}
+            />
+          )}
+          {stage === 'paywall' && (
+            <PaywallScreen
+              key="paywall"
+              onSubscribe={sub.subscribe}
+              onSuccess={async () => {
+                await sub.checkStatus()
+                actions.start()
+              }}
+              onDemo={() => {
+                actions.switchToDemo()
+                actions.start()
+              }}
+            />
+          )}
+          {stage === 'select' && (
+            <CravingScreen
+              key="select"
+              region={region}
+              onRegionChange={session.setRegion}
+              onCellChange={session.setLocationCell}
+              onSelect={actions.begin}
+              queueWaiting={session.queueWaiting}
+              onlineCount={session.onlineCount}
+            />
+          )}
+          {stage === 'matching' && food && (
+            <MatchingScreen
+              key="matching"
+              food={food}
+              region={region}
+              mode={mode}
+              status={status}
+              mediaIssue={session.mediaIssue}
+              localStream={session.localStream}
+              queueWaiting={session.queueWaiting}
+              onRetry={actions.retrySearch}
+              onDemo={actions.switchToDemo}
+              onBack={actions.changeCraving}
+            />
+          )}
+          {stage === 'video' && food && match && (
+            <VideoScreen
+              key="video"
+              food={food}
+              region={region}
+              mode={mode}
+              match={match}
+              localStream={session.localStream}
+              remoteStream={session.remoteStream}
+              onAccept={actions.accept}
+              onSkip={actions.skip}
+              onLeave={actions.changeCraving}
+              onReport={actions.reportPartner}
+              onBlock={actions.blockPartner}
+              onAddFriend={handleAddFriend}
+              onRate={handleRate}
+            />
+          )}
+        </AnimatePresence>
       </main>
 
       <AccountModal
@@ -316,9 +324,16 @@ export function NagrekApp() {
         displayName={auth.profile?.display_name || auth.profile?.username || undefined}
         username={auth.profile?.username}
         email={auth.user?.email}
+        social={{
+          instagram: auth.profile?.instagram,
+          snapchat: auth.profile?.snapchat,
+          facebook: auth.profile?.facebook,
+          linkedin: auth.profile?.linkedin,
+        }}
         subscription={sub.subscription}
         invitePath={auth.user ? `/?ref=${auth.user.id}` : undefined}
         onCancelSubscription={sub.cancel}
+        onSaveSocial={(handles) => auth.updateProfile(handles)}
         onOpenPaywall={() => {
           setAccountModalOpen(false)
           actions.goToPaywall()

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Loader2, Phone, Search, UserPlus, Check, X, Users } from 'lucide-react'
+import { Check, Loader2, Phone, Search, UserPlus, Users, X } from 'lucide-react'
+import { SOCIAL_LABELS, socialHref } from '@/lib/social-links'
 import { MagneticButton } from './magnetic-button'
 
 type FriendshipRow = {
@@ -10,7 +11,15 @@ type FriendshipRow = {
   status: 'pending' | 'accepted'
   other_user_id: string
   incoming?: boolean
-  other: { username: string | null; display_name: string | null; avatar_url: string | null } | null
+  other: {
+    username: string | null
+    display_name: string | null
+    avatar_url: string | null
+    instagram?: string | null
+    snapchat?: string | null
+    facebook?: string | null
+    linkedin?: string | null
+  } | null
 }
 
 export function FriendsScreen({
@@ -105,7 +114,7 @@ export function FriendsScreen({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 16, scale: 0.98 }}
         transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-        className="glass max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-3xl p-5 md:p-6"
+        className="glass max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/10 p-5 shadow-2xl md:p-6"
       >
         <div className="mb-5 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -114,7 +123,12 @@ export function FriendsScreen({
               Friends
             </h2>
           </div>
-          <button type="button" onClick={onClose} className="rounded-full p-2 text-muted-foreground hover:bg-white/10" aria-label="Close">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-2 text-muted-foreground hover:bg-white/10"
+            aria-label="Close"
+          >
             <X className="size-5" />
           </button>
         </div>
@@ -132,7 +146,10 @@ export function FriendsScreen({
         {results.length > 0 && (
           <ul className="mb-4 space-y-2">
             {results.map((u) => (
-              <li key={u.id} className="flex items-center justify-between gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm">
+              <li
+                key={u.id}
+                className="flex items-center justify-between gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm"
+              >
                 <span>
                   @{u.username} {u.display_name ? `· ${u.display_name}` : ''}
                 </span>
@@ -161,17 +178,30 @@ export function FriendsScreen({
                 <p className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">Pending</p>
                 <ul className="space-y-2">
                   {pending.map((r) => (
-                    <li key={r.id} className="flex items-center justify-between gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm">
+                    <li
+                      key={r.id}
+                      className="flex items-center justify-between gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm"
+                    >
                       <span>@{r.other?.username || 'user'}</span>
                       <div className="flex gap-2">
                         {r.incoming ? (
-                          <MagneticButton size="md" variant="success" disabled={busy === r.id} onClick={() => act({ id: r.id, action: 'accept' })}>
+                          <MagneticButton
+                            size="md"
+                            variant="success"
+                            disabled={busy === r.id}
+                            onClick={() => act({ id: r.id, action: 'accept' })}
+                          >
                             <Check className="size-4" />
                           </MagneticButton>
                         ) : (
                           <span className="text-xs text-muted-foreground">Sent</span>
                         )}
-                        <MagneticButton size="md" variant="ghost" disabled={busy === r.id} onClick={() => act({ id: r.id, action: 'remove' })}>
+                        <MagneticButton
+                          size="md"
+                          variant="ghost"
+                          disabled={busy === r.id}
+                          onClick={() => act({ id: r.id, action: 'remove' })}
+                        >
                           <X className="size-4" />
                         </MagneticButton>
                       </div>
@@ -183,31 +213,61 @@ export function FriendsScreen({
 
             <p className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">Your friends</p>
             {accepted.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No friends yet. After a great call, tap Add friend.</p>
+              <p className="text-sm text-muted-foreground">
+                No friends yet. After a great call, tap Add friend — then share Insta / Snap / FB / LinkedIn.
+              </p>
             ) : (
-              <ul className="space-y-2">
+              <ul className="space-y-3">
                 {accepted.map((r) => {
                   const online = onlineIds.has(r.other_user_id)
+                  const socials = SOCIAL_LABELS.filter((s) => r.other?.[s.key])
                   return (
-                    <li key={r.id} className="flex items-center justify-between gap-2 rounded-xl bg-white/5 px-3 py-2.5 text-sm">
-                      <div>
-                        <p className="font-medium">@{r.other?.username || 'user'}</p>
-                        <p className="text-xs text-muted-foreground">{online ? 'Online' : 'Offline'}</p>
+                    <li key={r.id} className="rounded-2xl border border-white/8 bg-white/[0.04] px-3 py-3 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="font-medium">@{r.other?.username || 'user'}</p>
+                          <p className="text-xs text-muted-foreground">{online ? 'Online' : 'Offline'}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <MagneticButton
+                            size="md"
+                            variant="primary"
+                            disabled={!online}
+                            onClick={() => onCallFriend(r.other_user_id)}
+                          >
+                            <Phone className="size-4" />
+                            Call
+                          </MagneticButton>
+                          <MagneticButton
+                            size="md"
+                            variant="ghost"
+                            onClick={() => act({ id: r.id, action: 'remove' })}
+                          >
+                            Remove
+                          </MagneticButton>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <MagneticButton
-                          size="md"
-                          variant="primary"
-                          disabled={!online}
-                          onClick={() => onCallFriend(r.other_user_id)}
-                        >
-                          <Phone className="size-4" />
-                          Call
-                        </MagneticButton>
-                        <MagneticButton size="md" variant="ghost" onClick={() => act({ id: r.id, action: 'remove' })}>
-                          Remove
-                        </MagneticButton>
-                      </div>
+                      {socials.length > 0 ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {socials.map((s) => {
+                            const value = r.other?.[s.key]
+                            if (!value) return null
+                            return (
+                              <a
+                                key={s.key}
+                                href={socialHref(s.key, value)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="rounded-full border border-white/15 bg-black/30 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-accent/40 hover:text-foreground"
+                              >
+                                {s.label}: @{value.replace(/^@/, '')}
+                              </a>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-[11px] text-muted-foreground">No social handles shared yet.</p>
+                      )}
                     </li>
                   )
                 })}

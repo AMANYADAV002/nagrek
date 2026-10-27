@@ -12,6 +12,10 @@ export interface Profile {
   age_confirmed_at: string | null
   location_cell: string | null
   location_updated_at: string | null
+  instagram: string | null
+  snapchat: string | null
+  facebook: string | null
+  linkedin: string | null
   role: 'user' | 'admin'
   banned_at: string | null
   ban_reason: string | null
@@ -122,6 +126,10 @@ export function useAuth() {
       age_confirmed_at: new Date().toISOString(),
       location_cell: null,
       location_updated_at: null,
+      instagram: null,
+      snapchat: null,
+      facebook: null,
+      linkedin: null,
       role: 'user',
       banned_at: null,
       ban_reason: null,

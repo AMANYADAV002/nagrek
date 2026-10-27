@@ -1,9 +1,8 @@
 'use client'
 
-import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { ArrowUpRight, Bell, BellOff, Crosshair, Loader2, MapPin, Shield } from 'lucide-react'
 import Image from 'next/image'
-import { useRef } from 'react'
 import { useGeoRegion } from '@/hooks/use-geo-region'
 import { useMealWindowNotify } from '@/hooks/use-meal-window-notify'
 import { FOODS, type Food, type FoodId } from '@/lib/foods'
@@ -41,8 +40,8 @@ export function CravingScreen({
       className="relative mx-auto flex min-h-dvh w-full max-w-6xl flex-col px-5 pb-12 pt-28 md:px-10"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0, filter: 'blur(8px)' }}
-      transition={{ duration: 0.5 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
     >
       <div className="mb-6 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         <span className="glass rounded-full px-3 py-1.5">
@@ -218,67 +217,30 @@ function RegionPanel({
 }
 
 function FoodCard({ food, index, onSelect }: { food: Food; index: number; onSelect: (id: FoodId) => void }) {
-  const ref = useRef<HTMLButtonElement>(null)
-  const px = useMotionValue(0.5)
-  const py = useMotionValue(0.5)
-  const rotateX = useSpring(useTransform(py, [0, 1], [8, -8]), { stiffness: 200, damping: 20 })
-  const rotateY = useSpring(useTransform(px, [0, 1], [-10, 10]), { stiffness: 200, damping: 20 })
-  const glareX = useTransform(px, (v) => `${v * 100}%`)
-  const glareY = useTransform(py, (v) => `${v * 100}%`)
-  const glare = useTransform(
-    [glareX, glareY],
-    ([x, y]) => `radial-gradient(circle at ${x} ${y}, rgba(255,220,190,0.22), transparent 55%)`,
-  )
   const Icon = food.icon
 
-  const onMove = (e: React.PointerEvent) => {
-    if (e.pointerType !== 'mouse') return
-    const rect = ref.current?.getBoundingClientRect()
-    if (!rect) return
-    px.set((e.clientX - rect.left) / rect.width)
-    py.set((e.clientY - rect.top) / rect.height)
-  }
-  const reset = () => {
-    px.set(0.5)
-    py.set(0.5)
-  }
-
   return (
-    <motion.button
-      ref={ref}
+    <button
       type="button"
-      data-cursor="hover"
       onClick={() => onSelect(food.id)}
-      onPointerMove={onMove}
-      onPointerLeave={reset}
-      initial={{ opacity: 0, y: 40 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.08 + index * 0.04, duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-      whileTap={{ scale: 0.97 }}
-      style={{ rotateX, rotateY, transformPerspective: 1000 }}
-      className="group relative block size-full min-h-36 overflow-hidden rounded-3xl border border-white/10 text-left focus-visible:outline-2 focus-visible:outline-offset-4"
+      className="group relative block size-full min-h-36 overflow-hidden rounded-3xl border border-white/10 text-left transition-transform duration-150 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-4"
       aria-label={`${food.label} — ${food.tagline}`}
     >
-      <motion.div layoutId={`food-${food.id}`} className="absolute inset-0 overflow-hidden rounded-3xl">
+      <div className="absolute inset-0 overflow-hidden rounded-3xl">
         <Image
           src={food.image || '/placeholder.svg'}
           alt=""
           fill
           sizes="(min-width: 768px) 25vw, 50vw"
-          className="object-cover transition-transform duration-[1.2s] ease-out group-hover:scale-110"
+          className="object-cover transition-transform duration-500 ease-out group-hover:scale-105"
           priority={index < 2}
         />
-      </motion.div>
+      </div>
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" aria-hidden="true" />
-      <motion.div
-        className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-        style={{ background: glare }}
-        aria-hidden="true"
-      />
 
       <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 p-4 md:p-5">
         <div className="min-w-0">
-          <span className="mb-2 inline-flex size-8 items-center justify-center rounded-full bg-white/10 backdrop-blur-md">
+          <span className="mb-2 inline-flex size-8 items-center justify-center rounded-full bg-white/10">
             <Icon className="size-4 text-accent" aria-hidden="true" />
           </span>
           <p className={cn('font-semibold leading-none tracking-tight', index === 0 ? 'text-3xl md:text-5xl' : 'text-xl md:text-2xl')}>
@@ -286,10 +248,10 @@ function FoodCard({ food, index, onSelect }: { food: Food; index: number; onSele
           </p>
           <p className="mt-1.5 hidden truncate text-sm text-white/70 sm:block">{food.tagline}</p>
         </div>
-        <span className="flex size-9 shrink-0 translate-y-2 items-center justify-center rounded-full bg-sunset text-primary-foreground opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-sunset text-primary-foreground opacity-80 transition-opacity group-hover:opacity-100">
           <ArrowUpRight className="size-4" aria-hidden="true" />
         </span>
       </div>
-    </motion.button>
+    </button>
   )
 }

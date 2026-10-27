@@ -12,6 +12,10 @@ export interface Database {
           age_confirmed_at: string | null
           location_cell: string | null
           location_updated_at: string | null
+          instagram: string | null
+          snapchat: string | null
+          facebook: string | null
+          linkedin: string | null
           role: 'user' | 'admin'
           banned_at: string | null
           ban_reason: string | null
@@ -26,6 +30,10 @@ export interface Database {
           age_confirmed_at?: string | null
           location_cell?: string | null
           location_updated_at?: string | null
+          instagram?: string | null
+          snapchat?: string | null
+          facebook?: string | null
+          linkedin?: string | null
           role?: 'user' | 'admin'
           banned_at?: string | null
           ban_reason?: string | null
@@ -40,6 +48,10 @@ export interface Database {
           age_confirmed_at?: string | null
           location_cell?: string | null
           location_updated_at?: string | null
+          instagram?: string | null
+          snapchat?: string | null
+          facebook?: string | null
+          linkedin?: string | null
           role?: 'user' | 'admin'
           banned_at?: string | null
           ban_reason?: string | null

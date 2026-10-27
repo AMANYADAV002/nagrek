@@ -1,9 +1,11 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { Calendar, CheckCircle2, CreditCard, Loader2, Mail, ShieldAlert, Sparkles, X } from 'lucide-react'
-import { useState } from 'react'
+import { Calendar, CheckCircle2, CreditCard, Loader2, Mail, Sparkles, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import type { SubscriptionData } from '@/hooks/use-subscription'
+import { Input } from '@/components/ui/input'
+import { normalizeSocialHandles } from '@/lib/social-links'
 
 interface AccountModalProps {
   isOpen: boolean
@@ -11,9 +13,21 @@ interface AccountModalProps {
   displayName?: string
   username?: string | null
   email?: string
+  social?: {
+    instagram?: string | null
+    snapchat?: string | null
+    facebook?: string | null
+    linkedin?: string | null
+  }
   subscription: SubscriptionData | null
   invitePath?: string
   onCancelSubscription: () => Promise<{ success: boolean; status: string; end_date: string | null }>
+  onSaveSocial?: (handles: {
+    instagram: string | null
+    snapchat: string | null
+    facebook: string | null
+    linkedin: string | null
+  }) => Promise<{ error: Error | null }>
   onOpenPaywall?: () => void
 }
 
@@ -23,15 +37,31 @@ export function AccountModal({
   displayName,
   username,
   email,
+  social,
   subscription,
   invitePath,
   onCancelSubscription,
+  onSaveSocial,
   onOpenPaywall,
 }: AccountModalProps) {
   const [cancelling, setCancelling] = useState(false)
   const [cancelResult, setCancelResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [instagram, setInstagram] = useState(social?.instagram || '')
+  const [snapchat, setSnapchat] = useState(social?.snapchat || '')
+  const [facebook, setFacebook] = useState(social?.facebook || '')
+  const [linkedin, setLinkedin] = useState(social?.linkedin || '')
+  const [savingSocial, setSavingSocial] = useState(false)
+  const [socialSaved, setSocialSaved] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) return
+    setInstagram(social?.instagram || '')
+    setSnapchat(social?.snapchat || '')
+    setFacebook(social?.facebook || '')
+    setLinkedin(social?.linkedin || '')
+  }, [isOpen, social?.instagram, social?.snapchat, social?.facebook, social?.linkedin])
 
   if (!isOpen) return null
 
@@ -118,6 +148,43 @@ export function AccountModal({
             </p>
           </div>
         </div>
+
+        {onSaveSocial && (
+          <div className="mt-4 space-y-2 rounded-2xl border border-white/10 bg-black/30 p-3">
+            <p className="text-xs font-medium text-foreground">Social handles for friends</p>
+            <p className="text-[11px] text-muted-foreground">
+              Visible only after both of you accept a friend request.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input value={instagram} onChange={(e) => setInstagram(e.target.value)} placeholder="Instagram" />
+              <Input value={snapchat} onChange={(e) => setSnapchat(e.target.value)} placeholder="Snapchat" />
+              <Input value={facebook} onChange={(e) => setFacebook(e.target.value)} placeholder="Facebook" />
+              <Input value={linkedin} onChange={(e) => setLinkedin(e.target.value)} placeholder="LinkedIn" />
+            </div>
+            <button
+              type="button"
+              disabled={savingSocial}
+              onClick={async () => {
+                setSavingSocial(true)
+                setError(null)
+                try {
+                  const handles = normalizeSocialHandles({ instagram, snapchat, facebook, linkedin })
+                  const res = await onSaveSocial(handles)
+                  if (res.error) throw res.error
+                  setSocialSaved(true)
+                  setTimeout(() => setSocialSaved(false), 2000)
+                } catch (err: unknown) {
+                  setError(err instanceof Error ? err.message : 'Could not save handles')
+                } finally {
+                  setSavingSocial(false)
+                }
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 py-2 text-xs font-medium hover:bg-white/10 disabled:opacity-50"
+            >
+              {savingSocial ? <Loader2 className="size-3.5 animate-spin" /> : socialSaved ? 'Saved' : 'Save socials'}
+            </button>
+          </div>
+        )}
 
         {invitePath && (
           <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-3">

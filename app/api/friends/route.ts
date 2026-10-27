@@ -29,17 +29,31 @@ export async function GET(req: NextRequest) {
     friendIds.add(row.requester_id === user.id ? row.receiver_id : row.requester_id)
   }
 
-  const profiles: Record<string, { username: string | null; display_name: string | null; avatar_url: string | null }> =
-    {}
+  const profiles: Record<
+    string,
+    {
+      username: string | null
+      display_name: string | null
+      avatar_url: string | null
+      instagram: string | null
+      snapchat: string | null
+      facebook: string | null
+      linkedin: string | null
+    }
+  > = {}
   if (friendIds.size) {
     const { data: profileRows } = await (supabase.from('profiles') as any)
-      .select('id, username, display_name, avatar_url')
+      .select('id, username, display_name, avatar_url, instagram, snapchat, facebook, linkedin')
       .in('id', [...friendIds])
     for (const p of profileRows || []) {
       profiles[p.id] = {
         username: p.username,
         display_name: p.display_name,
         avatar_url: p.avatar_url,
+        instagram: p.instagram ?? null,
+        snapchat: p.snapchat ?? null,
+        facebook: p.facebook ?? null,
+        linkedin: p.linkedin ?? null,
       }
     }
   }
