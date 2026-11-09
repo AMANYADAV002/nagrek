@@ -8,8 +8,10 @@ import { Chip } from "@/components/glass/chip";
 import { GradientButton } from "@/components/glass/gradient-button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { fileReport } from "@/lib/actions/meeting";
 import { uid } from "@/lib/format";
 import { updateSession, type ReportRecord } from "@/lib/mock/session";
+import { backendEnabled } from "@/lib/supabase/env";
 
 export const REPORT_REASONS = [
   "Harassment or bullying",
@@ -28,7 +30,7 @@ const reportSchema = z.object({
 
 /**
  * Report flow used on every surface (profile, story, room, feedback).
- * TODO(phase-5): insert into `reports` via a rate-limited server action.
+ * Live reports go to `reports` through a rate-limited server action.
  */
 export function ReportDialog({
   open,
@@ -48,12 +50,22 @@ export function ReportDialog({
   const [reason, setReason] = useState<string>("");
   const [details, setDetails] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
 
-  function submit() {
+  async function submit() {
     const parsed = reportSchema.safeParse({ reason, details: details || undefined });
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Invalid report");
       return;
+    }
+    if (backendEnabled()) {
+      setSending(true);
+      const res = await fileReport({ targetType, targetId, reason: parsed.data.reason, details: parsed.data.details });
+      setSending(false);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
     }
     updateSession((s) => ({
       reports: [
@@ -103,8 +115,8 @@ export function ReportDialog({
             <GradientButton variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </GradientButton>
-            <GradientButton variant="danger" onClick={submit}>
-              Send report
+            <GradientButton variant="danger" onClick={() => void submit()} disabled={sending}>
+              {sending ? "Sending…" : "Send report"}
             </GradientButton>
           </div>
         </div>

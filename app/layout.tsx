@@ -2,15 +2,24 @@ import type { Metadata, Viewport } from "next";
 import { Caveat, Manrope, Space_Grotesk } from "next/font/google";
 import { Providers } from "@/components/providers";
 import { AmbientBackground } from "@/components/brand/ambient-background";
+import { siteUrl } from "@/lib/site";
 import "./globals.css";
 
 const manrope = Manrope({ variable: "--font-manrope", subsets: ["latin"] });
 const spaceGrotesk = Space_Grotesk({ variable: "--font-space-grotesk", subsets: ["latin"] });
 const caveat = Caveat({ variable: "--font-caveat", subsets: ["latin"], weight: ["500", "600"] });
 
+const description = "Never eat alone. Match with people nearby who are craving the same food, meet on live video, then share a table.";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl()),
   title: { default: "Nagrek — Talk ⇄ Eat", template: "%s · Nagrek" },
-  description: "Never eat alone. Match with people nearby who are craving the same food, meet on live video, then share a table.",
+  description,
+  applicationName: "Nagrek",
+  keywords: ["food", "meet people", "foodies", "video call", "India", "social dining"],
+  openGraph: { type: "website", siteName: "Nagrek", title: "Nagrek — Talk ⇄ Eat", description, locale: "en_IN", url: "/" },
+  twitter: { card: "summary_large_image", title: "Nagrek — Talk ⇄ Eat", description },
+  alternates: { canonical: "/" },
 };
 
 export const viewport: Viewport = {

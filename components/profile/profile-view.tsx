@@ -22,8 +22,10 @@ import { toneLabel } from "@/lib/format";
 import { updateSession, useSession, type SessionState } from "@/lib/mock/session";
 import { deleteAccount, saveProfile, sendConnection, setBlock, setFollow, setMute } from "@/lib/actions/account";
 import { signOutEverywhere, syncBackend } from "@/lib/db/remote";
+import { isUuid } from "@/lib/db/map";
+import { daysLeft } from "@/lib/payments/plan-status";
 import { backendEnabled } from "@/lib/supabase/env";
-import { buildStoryGroups, groupSeen } from "@/lib/stories";
+import { groupSeen, storyHandlers, useStoryGroups } from "@/lib/stories";
 import { calculateStreak } from "@/lib/streak/calc";
 import type { MockUser, PlanId } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -70,7 +72,8 @@ function fromSession(s: SessionState): DisplayProfile {
 function fromUser(u: MockUser, s: SessionState): DisplayProfile {
   return {
     id: u.id, name: u.name, handle: u.handle, bio: u.bio, city: u.city, area: u.area, foods: u.foodInterests,
-    tone: u.tone, trustScore: u.trustScore, streak: u.streak, planId: u.plan, avatar: u.avatar,
+    // Real people's plans are private; only demo people show a badge.
+    tone: u.tone, trustScore: u.trustScore, streak: u.streak, planId: isUuid(u.id) ? null : u.plan, avatar: u.avatar,
     followers: u.followers + (s.following.includes(u.id) ? 1 : 0), following: u.following, connections: u.connections,
   };
 }
@@ -83,12 +86,14 @@ export function ProfileView({ user }: { user?: MockUser }) {
   const [editing, setEditing] = useState(false);
   const [bio, setBio] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const allGroups = useStoryGroups(session);
+  const [handlers] = useState(storyHandlers);
 
   if (!session) return null;
   const isMe = !user;
   const p = isMe ? fromSession(session) : fromUser(user, session);
   const plan = getPlan(p.planId);
-  const groups = buildStoryGroups(session).filter((g) => g.userId === p.id);
+  const groups = allGroups.filter((g) => (isMe ? g.isMine : g.userId === p.id));
   const ringState = groups.length ? (groupSeen(groups[0], session.seenStories) ? "seen" : "unseen") : "none";
   const following = !isMe && session.following.includes(p.id);
   const connection = !isMe ? session.connections[p.id] : undefined;
@@ -286,17 +291,19 @@ export function ProfileView({ user }: { user?: MockUser }) {
                 <div>
                   <h2 className="text-lg font-medium">Your plan</h2>
                   <p className="text-sm text-soft">
-                    {plan ? `${plan.name} · ${formatInr(plan.priceInr)}/month · active` : "No active plan"}
+                    {plan ? `${plan.name} · ${formatInr(plan.priceInr)} per 30 days · active` : "No active plan"}
                   </p>
                   {session.planSince && <p className="mt-1 text-xs text-soft">Since {new Date(session.planSince).toLocaleDateString("en-IN")}</p>}
+                  {session.planExpiresAt && (
+                    <p className="mt-1 text-xs text-soft">
+                      Active until {new Date(session.planExpiresAt).toLocaleDateString("en-IN")} · {daysLeft(session.planExpiresAt)} days left. No auto-renewal.
+                    </p>
+                  )}
                 </div>
                 <ShieldCheck className="size-5 text-peach" aria-hidden />
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <GradientLink href="/plans" size="sm" variant="glass">Change plan</GradientLink>
-                <GradientButton size="sm" variant="ghost" onClick={() => toast.info("Cancellation goes live with Razorpay in Phase 3.")}>
-                  Cancel plan
-                </GradientButton>
+                <GradientLink href="/plans" size="sm" variant="glass">Extend or change plan</GradientLink>
               </div>
             </GlassCard>
             <GlassCard className="p-6">
@@ -374,8 +381,8 @@ export function ProfileView({ user }: { user?: MockUser }) {
         <StoryViewer
           groups={groups}
           onClose={() => setViewer(false)}
-          onSeen={(id) => updateSession((s) => (s.seenStories.includes(id) ? {} : { seenStories: [...s.seenStories, id] }))}
-          onDelete={(id) => updateSession((s) => ({ myStories: s.myStories.filter((x) => x.id !== id) }))}
+          onSeen={handlers.onSeen}
+          onDelete={handlers.onDelete}
         />
       )}
       {!isMe && (

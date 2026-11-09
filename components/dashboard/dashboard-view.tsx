@@ -12,6 +12,9 @@ import { GlassCard } from "@/components/glass/glass-card";
 import { GradientButton } from "@/components/glass/gradient-button";
 import { Eyebrow } from "@/components/glass/section-heading";
 import { StoriesRow } from "@/components/stories/stories-row";
+import { acceptJoinAndGo } from "@/components/notifications/notification-bell";
+import { useNotifications } from "@/components/notifications/notifications-provider";
+import { cancelCraving, getMatchQuota, postCraving, proposeMatch, type Quota } from "@/lib/actions/matching";
 import { getPlan } from "@/lib/config/plans";
 import { cravingEmoji, cuisineChips } from "@/lib/data/cravings";
 import { track } from "@/lib/analytics";
@@ -22,31 +25,51 @@ import {
 import { useSession } from "@/lib/mock/session";
 import { getMockUser } from "@/lib/mock/users";
 import { calculateStreak } from "@/lib/streak/calc";
+import { backendEnabled } from "@/lib/supabase/env";
 import type { MockUser } from "@/lib/types";
+
+type LiveMatch = { user: MockUser; score: number; distanceKm?: number; requestId?: string };
 
 type Phase =
   | { kind: "idle" }
   | { kind: "searching" }
-  | { kind: "live"; matches: { user: MockUser; score: number; distanceKm?: number }[]; expiresAt: number }
-  | { kind: "pinged"; pinged: MockUser[]; expiresAt: number; acceptedBy?: MockUser };
+  | { kind: "live"; matches: LiveMatch[]; expiresAt: number }
+  | { kind: "pinged"; pinged: MockUser[]; count: number; matches: LiveMatch[]; expiresAt: number; acceptedBy?: MockUser };
 
 export function DashboardView() {
   const router = useRouter();
   const session = useSession();
+  const live = backendEnabled();
+  const { notes, markRead } = useNotifications();
   const [craving, setCraving] = useState<string>("");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [incoming, setIncoming] = useState<{ user: MockUser; food: string } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [matchesToday, setMatchesToday] = useState(1);
+  const [quota, setQuota] = useState<Quota | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const prefs = session?.preferences;
   const plan = getPlan(session?.plan);
-  const limit = plan?.dailyMatches ?? 0;
+  const limit: number | "unlimited" = live
+    ? quota
+      ? (quota.limit ?? "unlimited")
+      : (plan?.dailyMatches ?? 0)
+    : (plan?.dailyMatches ?? 0);
+  const used = live ? (quota?.used ?? 0) : matchesToday;
   const excluded = session ? [...session.blocked] : [];
 
-  // Simulated incoming "request to join" ping. TODO(phase-4): Supabase Realtime `notifications` channel + Web Push.
+  // Live: someone nearby pinged me, or my request was accepted / matched.
+  const joinPing = live ? notes.find((n) => n.kind === "join_request" && !n.read_at) : undefined;
+  const ready = live ? notes.find((n) => (n.kind === "join_accepted" || n.kind === "match") && !n.read_at) : undefined;
+
   useEffect(() => {
-    if (!session?.notificationsEnabled) return;
+    if (live) void getMatchQuota().then(setQuota);
+  }, [live]);
+
+  // Demo only: a simulated incoming "request to join" ping. Live pings arrive as notifications.
+  useEffect(() => {
+    if (live || !session?.notificationsEnabled) return;
     const t = setTimeout(() => {
       const u = getMockUser("u-meera");
       if (u && !session.blocked.includes(u.id)) setIncoming({ user: u, food: u.foodInterests[0] });
@@ -78,20 +101,36 @@ export function DashboardView() {
 
   async function search() {
     if (!craving) return toast.error("Pick what you are craving first.");
-    if (limit !== "unlimited" && matchesToday >= limit) return toast.error(`You have used all ${limit} matches today. Upgrade for more.`);
+    if (limit !== "unlimited" && used >= limit) return toast.error(`You have used all ${limit} matches today. Upgrade for more.`);
     setPhase({ kind: "searching" });
-    // TODO(phase-4): insert into `match_requests` (food, tone, location, expires_at) and query candidates server-side.
+
+    if (live) {
+      const [res] = await Promise.all([postCraving(craving), new Promise((r) => setTimeout(r, 1200))]);
+      if (!res.ok) {
+        setPhase({ kind: "idle" });
+        return toast.error(res.error);
+      }
+      setQuota(res.quota);
+      setNow(Date.now());
+      const expiresAt = new Date(res.expiresAt).getTime();
+      const matches = res.matches.map((c) => ({ user: c.person, score: c.score, distanceKm: c.distanceKm, requestId: c.requestId }));
+      track("craving", { food: craving, live: matches.length, pinged: res.pinged });
+      if (matches.length >= LOW_TRAFFIC_THRESHOLD) setPhase({ kind: "live", matches, expiresAt });
+      else setPhase({ kind: "pinged", pinged: [], count: res.pinged, matches, expiresAt });
+      return;
+    }
+
     await new Promise((r) => setTimeout(r, 2200));
-    const live = findLiveMatches(myPrefs, craving, excluded);
+    const found = findLiveMatches(myPrefs, craving, excluded);
     const expires = Date.now() + REQUEST_TTL_MS;
     setNow(Date.now());
-    if (live.length >= LOW_TRAFFIC_THRESHOLD) {
-      setPhase({ kind: "live", matches: live, expiresAt: expires });
+    if (found.length >= LOW_TRAFFIC_THRESHOLD) {
+      setPhase({ kind: "live", matches: found, expiresAt: expires });
       return;
     }
     const pinged = joinPingCandidates(myPrefs, craving, excluded);
-    const pool = pinged.length ? pinged : live.map((l) => l.user);
-    setPhase({ kind: "pinged", pinged: pool, expiresAt: expires });
+    const pool = pinged.length ? pinged : found.map((l) => l.user);
+    setPhase({ kind: "pinged", pinged: pool, count: pool.length, matches: [], expiresAt: expires });
     if (pool.length) {
       setTimeout(() => {
         setPhase((p) => (p.kind === "pinged" ? { ...p, acceptedBy: pool[0] } : p));
@@ -100,10 +139,29 @@ export function DashboardView() {
     }
   }
 
-  function startMatch(user: MockUser, food: string) {
-    setMatchesToday((n) => n + 1);
+  async function startMatch(user: MockUser, food: string, requestId?: string) {
     track("match", { food, with: user.id });
+    if (live && requestId) {
+      setBusy(true);
+      const res = await proposeMatch(requestId);
+      setBusy(false);
+      if (!res.ok) return toast.error(res.error);
+      router.push(`/match/${res.matchId}/pre`);
+      return;
+    }
+    setMatchesToday((n) => n + 1);
     router.push(`/match/${uid("m")}/pre?with=${user.id}&food=${encodeURIComponent(food)}`);
+  }
+
+  function openReady() {
+    if (!ready) return;
+    markRead([ready.id]);
+    router.push(`/match/${ready.payload.matchId}/pre`);
+  }
+
+  function cancelRequest() {
+    setPhase({ kind: "idle" });
+    if (live) void cancelCraving();
   }
 
   const streak = calculateStreak(session.streakEvents);
@@ -114,6 +172,55 @@ export function DashboardView() {
   return (
     <div className="space-y-6">
       <AnimatePresence>
+        {(joinPing || ready) && (
+          <motion.div
+            key={(ready ?? joinPing)!.id}
+            initial={{ opacity: 0, y: -20, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20 }}
+            role="alert"
+            className="glass-strong flex flex-wrap items-center gap-4 rounded-2xl p-4 ring-1 ring-peach/40"
+          >
+            <span className="relative grid size-11 place-items-center rounded-full bg-peach/15 text-peach">
+              <span className="animate-pulse-ring absolute inset-0 rounded-full border border-peach/50" />
+              <BellRing className="size-5" aria-hidden />
+            </span>
+            {ready ? (
+              <>
+                <p className="min-w-0 flex-1 text-sm font-semibold">
+                  {ready.kind === "join_accepted" ? "Someone accepted your" : "Someone matched with your"} {ready.payload.food}{" "}
+                  {cravingEmoji[ready.payload.food ?? ""] ?? ""} request!
+                </p>
+                <GradientButton size="sm" onClick={openReady}>Open match</GradientButton>
+              </>
+            ) : (
+              <>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold">
+                    Someone nearby wants {joinPing!.payload.food} {cravingEmoji[joinPing!.payload.food ?? ""] ?? ""}. Want to join?
+                  </p>
+                  <p className="text-xs text-soft">
+                    {joinPing!.payload.area} · {toneLabel((joinPing!.payload.tone ?? "random") as MockUser["tone"])} · matches your saved interests
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <GradientButton size="sm" variant="ghost" onClick={() => markRead([joinPing!.id])}>Decline</GradientButton>
+                  <GradientButton
+                    size="sm"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      await acceptJoinAndGo(joinPing!, router, markRead);
+                      setBusy(false);
+                    }}
+                  >
+                    {busy ? "Joining…" : "Accept"}
+                  </GradientButton>
+                </div>
+              </>
+            )}
+          </motion.div>
+        )}
         {incoming && (
           <motion.div
             initial={{ opacity: 0, y: -20, scale: 0.96 }}
@@ -168,7 +275,7 @@ export function DashboardView() {
             <span className="flex items-center gap-1"><MapPin className="size-3.5 text-peach" aria-hidden /> {myPrefs.location.area ? `${myPrefs.location.area}, ` : ""}{myPrefs.location.city}</span>
             <span>{toneLabel(myPrefs.tone)}</span>
             <span>
-              {limit === "unlimited" ? "Unlimited matches" : `${Math.max(0, limit - matchesToday)} of ${limit} matches left today`}
+              {limit === "unlimited" ? "Unlimited matches" : `${Math.max(0, limit - used)} of ${limit} matches left today`}
             </span>
           </p>
 
@@ -209,13 +316,12 @@ export function DashboardView() {
               <motion.div key="results" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="relative mt-6 space-y-4">
                 <div className="flex items-center justify-between text-xs text-soft">
                   <span className="flex items-center gap-1.5"><Clock className="size-3.5 text-peach" aria-hidden /> Request expires in {mm}:{ss}</span>
-                  <button type="button" className="flex items-center gap-1 hover:text-cream" onClick={() => setPhase({ kind: "idle" })}>
+                  <button type="button" className="flex items-center gap-1 hover:text-cream" onClick={cancelRequest}>
                     <X className="size-3.5" aria-hidden /> Cancel request
                   </button>
                 </div>
 
-                {phase.kind === "live" &&
-                  phase.matches.map(({ user, score, distanceKm }, i) => (
+                {(phase.kind === "live" ? phase.matches : phase.matches).map(({ user, score, distanceKm, requestId }, i) => (
                     <motion.div
                       key={user.id}
                       initial={{ opacity: 0, x: -20 }}
@@ -233,7 +339,7 @@ export function DashboardView() {
                         </p>
                       </div>
                       <span className="hidden rounded-full bg-peach/15 px-2.5 py-1 text-xs font-bold text-peach sm:inline">{score}% match</span>
-                      <GradientButton size="sm" onClick={() => startMatch(user, craving)}>Match</GradientButton>
+                      <GradientButton size="sm" disabled={busy} onClick={() => startMatch(user, craving, requestId)}>Match</GradientButton>
                     </motion.div>
                   ))}
 
@@ -242,7 +348,7 @@ export function DashboardView() {
                     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm">
                       <p className="flex items-center gap-2 font-semibold"><Send className="size-4 text-peach" aria-hidden /> It is quiet right now</p>
                       <p className="mt-1 text-soft">
-                        We sent &quot;Someone nearby wants {craving}. Want to join?&quot; to {phase.pinged.length} {phase.pinged.length === 1 ? "person" : "people"} who saved {craving} as a favourite.
+                        We sent &quot;Someone nearby wants {craving}. Want to join?&quot; to {phase.count} {phase.count === 1 ? "person" : "people"} who saved {craving} as a favourite.
                         Pings respect their notification settings and daily limits.
                       </p>
                     </div>
@@ -252,7 +358,12 @@ export function DashboardView() {
                         <p className="flex-1 text-sm"><strong>{phase.acceptedBy.name}</strong> accepted your request!</p>
                         <GradientButton size="sm" onClick={() => startMatch(phase.acceptedBy!, craving)}>Continue</GradientButton>
                       </motion.div>
-                    ) : phase.pinged.length ? (
+                    ) : ready ? (
+                      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="flex items-center gap-4 rounded-2xl bg-peach/10 p-4 ring-1 ring-peach/40">
+                        <p className="flex-1 text-sm"><strong>Someone</strong> accepted your request!</p>
+                        <GradientButton size="sm" onClick={openReady}>Continue</GradientButton>
+                      </motion.div>
+                    ) : phase.count ? (
                       <p className="flex items-center gap-2 text-xs text-soft"><Radar className="size-4 animate-spin text-peach [animation-duration:3s]" aria-hidden /> Waiting for someone to accept…</p>
                     ) : (
                       <p className="text-sm text-soft">Nobody has saved {craving} yet. Try another craving or check back soon.</p>

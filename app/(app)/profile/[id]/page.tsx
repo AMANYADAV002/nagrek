@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { ProfileView } from "@/components/profile/profile-view";
+import { getPerson } from "@/lib/actions/people";
+import { isUuid } from "@/lib/db/map";
 import { getMockUser, mockUsers } from "@/lib/mock/users";
 
 export function generateStaticParams() {
@@ -8,8 +10,7 @@ export function generateStaticParams() {
 
 export default async function UserProfilePage({ params }: PageProps<"/profile/[id]">) {
   const { id } = await params;
-  // TODO(phase-2): load from `profiles` with RLS + block filtering server-side.
-  const user = getMockUser(id);
+  const user = isUuid(id) ? await getPerson(id) : getMockUser(id);
   if (!user) notFound();
   return <ProfileView user={user} />;
 }

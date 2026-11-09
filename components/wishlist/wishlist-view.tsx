@@ -18,7 +18,8 @@ import { addFuturePlan, addWish, deleteWish, shareWish } from "@/lib/actions/acc
 import { syncBackend } from "@/lib/db/remote";
 import { backendEnabled } from "@/lib/supabase/env";
 import { updateSession, useSession, type WishItem } from "@/lib/mock/session";
-import { getMockUser } from "@/lib/mock/users";
+import { usePeople } from "@/lib/people-client";
+import type { MockUser } from "@/lib/types";
 
 const wishSchema = z.object({
   kind: z.enum(["place", "food", "idea"]),
@@ -45,8 +46,14 @@ export function WishlistView() {
   const [planFor, setPlanFor] = useState<WishItem | null>(null);
   const [shareFor, setShareFor] = useState<WishItem | null>(null);
 
+  const people = usePeople(
+    session
+      ? [...new Set([...Object.keys(session.connections), ...session.wishlist.flatMap((w) => w.sharedWith), ...session.futurePlans.flatMap((p) => p.invitees)])]
+      : [],
+  );
   if (!session) return null;
-  const friends = Object.entries(session.connections).filter(([, s]) => s === "accepted").map(([id]) => getMockUser(id)).filter((u) => !!u);
+  const friends = people.filter((u) => session.connections[u.id] === "accepted");
+  const firstName = (id: string) => people.find((u) => u.id === id)?.name.split(" ")[0] ?? "a friend";
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
@@ -92,7 +99,7 @@ export function WishlistView() {
               <div className="flex-1">
                 <p className="font-semibold">{p.title}</p>
                 <p className="text-xs text-soft">
-                  {new Date(p.date).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} · {p.place} · with {p.invitees.map((i) => getMockUser(i)?.name.split(" ")[0]).join(", ")}
+                  {new Date(p.date).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} · {p.place} · with {p.invitees.map(firstName).join(", ")}
                 </p>
               </div>
               <span className="rounded-full bg-amber-400/15 px-3 py-1 text-xs text-amber-200">Invite pending</span>
@@ -117,7 +124,7 @@ export function WishlistView() {
                         <p className="font-semibold">{w.title}</p>
                         {w.note && <p className="text-sm text-soft">{w.note}</p>}
                         {w.sharedWith.length > 0 && (
-                          <p className="mt-1 text-xs text-peach">Shared with {w.sharedWith.map((i) => getMockUser(i)?.name.split(" ")[0]).join(", ")}</p>
+                          <p className="mt-1 text-xs text-peach">Shared with {w.sharedWith.map(firstName).join(", ")}</p>
                         )}
                       </div>
                       <button type="button" aria-label={`Delete ${w.title}`} onClick={() => { updateSession((s) => ({ wishlist: s.wishlist.filter((x) => x.id !== w.id) })); syncBackend(() => deleteWish(w.id)); }} className="grid size-8 place-items-center rounded-full text-soft hover:bg-white/10 hover:text-red-300">
@@ -142,7 +149,7 @@ export function WishlistView() {
   );
 }
 
-type Friend = NonNullable<ReturnType<typeof getMockUser>>;
+type Friend = MockUser;
 
 function ShareDialog({ item, friends, onClose }: { item: WishItem | null; friends: Friend[]; onClose: () => void }) {
   const [picked, setPicked] = useState<string[]>([]);

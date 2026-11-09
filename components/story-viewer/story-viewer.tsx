@@ -7,6 +7,7 @@ import { Eye, Flag, Pause, Play, Trash2, X } from "lucide-react";
 import { LayeredAvatar } from "@/components/avatar/layered-avatar";
 import { ReportDialog } from "@/components/safety/report-dialog";
 import { timeAgo } from "@/lib/format";
+import { rawStorySrc } from "@/lib/stories";
 import type { AvatarConfig, Story } from "@/lib/types";
 
 export interface StoryGroup {
@@ -172,7 +173,7 @@ export function StoryViewer({
                 }}
                 onEnded={next}
               />
-            ) : story.src.startsWith("blob:") || story.src.startsWith("data:") ? (
+            ) : rawStorySrc(story.src) ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={story.src} alt={story.caption ?? "Story"} className="size-full object-cover" />
             ) : (

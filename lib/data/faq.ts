@@ -17,7 +17,7 @@ export const faqs = [
   },
   {
     q: "How much does it cost?",
-    a: "There are three plans: Plus, Premium and Ultra. Prices shown in the app are placeholders while we are in early access.",
+    a: "There are three plans: Plus, Premium and Ultra. Each is a 30-day pass with no auto-renewal. During early access every plan is free.",
   },
   {
     q: "What are streaks and rewards?",

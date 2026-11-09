@@ -6,11 +6,16 @@ import type { MockUser, Preferences } from "@/lib/types";
 export const REQUEST_TTL_MS = 15 * 60_000;
 /** Below this many live candidates we fall back to "request to join" pings. */
 export const LOW_TRAFFIC_THRESHOLD = 2;
-/** Max people pinged per request; per-user daily caps are enforced server-side. TODO(phase-4). */
+/** Max people pinged per request, and per person per day. Enforced in lib/actions/matching.ts. */
 export const MAX_JOIN_PINGS_PER_REQUEST = 5;
 export const MAX_JOIN_PINGS_PER_USER_PER_DAY = 3;
+/**
+ * Live pre-meet window. Longer than the demo's 10 s because both people first have to
+ * open the page; the blurred countdown shows whatever is left.
+ */
+export const MATCH_DECISION_MS = 45_000;
 
-/** Phase 1 stand-in for "users with an open match_request right now". TODO(phase-4): Supabase Realtime presence. */
+/** Demo only: stand-in for "users with an open match request right now". */
 const ONLINE_IDS = new Set(["u-aisha", "u-rohan", "u-arjun", "u-kabir"]);
 
 export function profileFromPreferences(p: Preferences): MatchProfile {

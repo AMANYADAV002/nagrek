@@ -14,25 +14,27 @@ import { toneLabel } from "@/lib/format";
 import { cancelConnection, respondConnection, sendConnection, setBlock, setFollow } from "@/lib/actions/account";
 import { syncBackend } from "@/lib/db/remote";
 import { updateSession, useSession } from "@/lib/mock/session";
-import { mockUsers } from "@/lib/mock/users";
+import { useDiscover, usePeople } from "@/lib/people-client";
 import type { MockUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Tab = "requests" | "friends" | "sent" | "discover" | "blocked";
 
-/** TODO(phase-2): `follows`, `connections`, `blocks` tables with RLS. */
+/** Follows, connections and blocks. Live mode reads real people; demo mode uses the built-in ones. */
 export function ConnectionsView() {
   const session = useSession();
   const [tab, setTab] = useState<Tab>("requests");
+  const known = usePeople(session ? [...new Set([...Object.keys(session.connections), ...session.blocked])] : []);
+  const { people: discover, loading } = useDiscover();
   if (!session) return null;
 
-  const by = (status: string) => mockUsers.filter((u) => session.connections[u.id] === status && !session.blocked.includes(u.id));
+  const by = (status: string) => known.filter((u) => session.connections[u.id] === status && !session.blocked.includes(u.id));
   const lists: Record<Tab, MockUser[]> = {
     requests: by("pending-in"),
     friends: by("accepted"),
     sent: by("pending-out"),
-    discover: mockUsers.filter((u) => !session.connections[u.id] && !session.blocked.includes(u.id)),
-    blocked: mockUsers.filter((u) => session.blocked.includes(u.id)),
+    discover: discover.filter((u) => !session.connections[u.id] && !session.blocked.includes(u.id)),
+    blocked: known.filter((u) => session.blocked.includes(u.id)),
   };
 
   const setConn = (id: string, status: "accepted" | "pending-out" | null) =>
@@ -71,7 +73,11 @@ export function ConnectionsView() {
       </div>
 
       {lists[tab].length === 0 ? (
-        <EmptyState icon={<Users className="size-8" />} title="Nothing here yet" description={tab === "requests" ? "No pending requests. Meet people to grow your table." : "Check back after your next meeting."} />
+        <EmptyState
+          icon={<Users className="size-8" />}
+          title={tab === "discover" && loading ? "Finding people…" : "Nothing here yet"}
+          description={tab === "requests" ? "No pending requests. Meet people to grow your table." : "Check back after your next meeting."}
+        />
       ) : (
         <ul className="grid gap-3 md:grid-cols-2">
           <AnimatePresence initial={false}>

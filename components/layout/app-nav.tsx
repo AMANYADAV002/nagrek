@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Wordmark } from "@/components/brand/wordmark";
 import { LayeredAvatar } from "@/components/avatar/layered-avatar";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import { getPlan } from "@/lib/config/plans";
 import { useSession } from "@/lib/mock/session";
 import { signOutEverywhere } from "@/lib/db/remote";
@@ -41,7 +42,10 @@ export function AppNav() {
     <>
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-white/8 bg-ink/60 p-6 backdrop-blur-xl lg:flex">
-        <Wordmark href="/dashboard" />
+        <div className="flex items-center justify-between">
+          <Wordmark href="/dashboard" />
+          <NotificationBell />
+        </div>
         <nav aria-label="Main" className="mt-10 flex flex-col gap-1">
           {[...items, ...secondary].map(({ href, label, icon: Icon }) => {
             const active = isActive(pathname, href);
@@ -96,6 +100,7 @@ export function AppNav() {
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-white/8 bg-ink/70 px-4 py-3 backdrop-blur-xl lg:hidden">
         <Wordmark href="/dashboard" className="text-xl" />
         <div className="flex items-center gap-1">
+          <NotificationBell />
           {secondary.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}

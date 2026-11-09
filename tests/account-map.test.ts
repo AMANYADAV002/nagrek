@@ -41,6 +41,7 @@ describe("accountFromRows", () => {
       avatar: { skin: "s2", hair: "short", hairColor: "black", outfit: "tee", accessory: "none", background: "peach" },
       plan_id: "premium",
       plan_since: "2026-11-01T00:00:00Z",
+      plan_expires_at: "2999-01-01T00:00:00Z",
       onboarded_at: "2026-11-01T00:00:00Z",
       notifications_enabled: false,
     },
@@ -57,6 +58,11 @@ describe("accountFromRows", () => {
     muted: [],
     wishes: [{ id: "77777777-7777-4777-8777-777777777777", kind: "place", title: "Cafe", note: null, created_at: "2026-11-01T00:00:00Z", wishlist_shares: [{ shared_with: "22222222-2222-4222-8222-222222222222" }] }],
     plans: [],
+    inventory: [{ category: "hair", item_id: "curly" }],
+  });
+
+  it("loads bought avatar items", () => {
+    expect(account.ownedItems).toEqual(["hair:curly"]);
   });
 
   it("maps connection direction and drops rejected ones", () => {

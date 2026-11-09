@@ -11,14 +11,15 @@ import { AddStoryButton } from "@/components/stories/add-story-button";
 import { StoriesRow } from "@/components/stories/stories-row";
 import { StoryViewer } from "@/components/story-viewer/story-viewer";
 import { timeAgo } from "@/lib/format";
-import { updateSession, useSession } from "@/lib/mock/session";
-import { buildStoryGroups } from "@/lib/stories";
+import { useSession } from "@/lib/mock/session";
+import { rawStorySrc, storyHandlers, useStoryGroups } from "@/lib/stories";
 
 export function StoriesFeed() {
   const session = useSession();
   const [open, setOpen] = useState<number | null>(null);
+  const groups = useStoryGroups(session);
+  const [handlers] = useState(storyHandlers);
   if (!session) return null;
-  const groups = buildStoryGroups(session);
 
   return (
     <div className="space-y-8">
@@ -43,7 +44,7 @@ export function StoriesFeed() {
         <Stagger className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
           {groups.map((g, idx) => {
             const s = g.stories[g.stories.length - 1];
-            const isData = s.src.startsWith("data:") || s.src.startsWith("blob:");
+            const isData = rawStorySrc(s.src);
             return (
               <StaggerItem key={g.userId}>
                 <button
@@ -87,8 +88,8 @@ export function StoriesFeed() {
           groups={groups}
           startGroup={open}
           onClose={() => setOpen(null)}
-          onSeen={(id) => updateSession((s) => (s.seenStories.includes(id) ? {} : { seenStories: [...s.seenStories, id] }))}
-          onDelete={(id) => updateSession((s) => ({ myStories: s.myStories.filter((x) => x.id !== id) }))}
+          onSeen={handlers.onSeen}
+          onDelete={handlers.onDelete}
         />
       )}
     </div>

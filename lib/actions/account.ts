@@ -3,8 +3,11 @@
 import { TERMS_VERSION } from "@/lib/data/legal";
 import { accountFromRows, isUuid, preferencesRow, publicProfilePatch } from "@/lib/db/map";
 import type { Plan } from "@/lib/config/plans";
-import type { PlanId } from "@/lib/types";
+import type { AvatarConfig, PlanId } from "@/lib/types";
 import type { SessionState } from "@/lib/mock/session";
+import type { StreakEvent } from "@/lib/streak/calc";
+import { blockedEitherWay } from "@/lib/people";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { onboardingSchema } from "@/lib/validation/onboarding";
 
@@ -24,8 +27,13 @@ export async function loadMyAccount(): Promise<{ account: SessionState | null; e
   const user = auth.user;
   if (!user) return { account: null };
 
-  const [profileRes, prefRes, consentRes, followRes, connRes, blockRes, muteRes, wishRes, planRes] = await Promise.all([
-    supabase.from("profiles").select("id, name, handle, bio, avatar, plan_id, plan_since, onboarded_at, notifications_enabled").eq("id", user.id).maybeSingle(),
+  const streakSince = new Date(Date.now() - 40 * 86_400_000).toISOString();
+  const [profileRes, prefRes, consentRes, followRes, connRes, blockRes, muteRes, wishRes, planRes, inventoryRes, streakRes] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, name, handle, bio, avatar, plan_id, plan_since, plan_expires_at, onboarded_at, notifications_enabled")
+      .eq("id", user.id)
+      .maybeSingle(),
     supabase.from("user_preferences").select("*").eq("user_id", user.id).maybeSingle(),
     supabase.from("consents").select("adult, respectful, terms_version, accepted_at").eq("user_id", user.id).order("accepted_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("follows").select("following_id").eq("follower_id", user.id),
@@ -34,9 +42,11 @@ export async function loadMyAccount(): Promise<{ account: SessionState | null; e
     supabase.from("mutes").select("muted_id").eq("user_id", user.id),
     supabase.from("wishlist_items").select("id, kind, title, note, created_at, wishlist_shares(shared_with)").eq("user_id", user.id).order("created_at", { ascending: false }),
     supabase.from("plans_future").select("id, wish_id, title, meet_at, place, plan_invites(invitee_id)").eq("user_id", user.id).order("meet_at"),
+    supabase.from("user_avatar_inventory").select("category, item_id").eq("user_id", user.id),
+    supabase.from("streak_events").select("type, at").eq("user_id", user.id).gte("at", streakSince).order("at"),
   ]);
 
-  const failed = [profileRes, prefRes, consentRes, followRes, connRes, blockRes, muteRes, wishRes, planRes].find((r) => r.error);
+  const failed = [profileRes, prefRes, consentRes, followRes, connRes, blockRes, muteRes, wishRes, planRes, inventoryRes, streakRes].find((r) => r.error);
   if (failed?.error) return { account: null, error: failed.error.message };
   if (!profileRes.data) return { account: null, error: "Profile was not created. Check the signup trigger in the migration." };
 
@@ -61,6 +71,8 @@ export async function loadMyAccount(): Promise<{ account: SessionState | null; e
       muted: (muteRes.data ?? []).map((r) => r.muted_id),
       wishes: wishRes.data ?? [],
       plans: planRes.data ?? [],
+      inventory: inventoryRes.data ?? [],
+      streakEvents: (streakRes.data ?? []) as StreakEvent[],
     }),
   };
 }
@@ -110,12 +122,12 @@ export async function saveOnboarding(raw: unknown): Promise<Result> {
   return { ok: true };
 }
 
-/** Writes a mock subscription until Razorpay (phase 3) takes over. */
-export async function saveMockPlan(planId: PlanId): Promise<Result> {
+/** The database checks that every layer is free, bought, or unlocked before saving. */
+export async function saveAvatar(avatar: AvatarConfig): Promise<Result> {
   const { supabase, userId } = await client();
   if (!supabase) return { ok: true };
   if (!userId) return { ok: false, error: "Not signed in" };
-  const { error } = await supabase.rpc("activate_mock_plan", { p_plan: planId });
+  const { error } = await supabase.rpc("save_avatar", { p_avatar: avatar });
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
@@ -136,6 +148,12 @@ export async function deleteAccount(): Promise<Result> {
   const { supabase, userId } = await client();
   if (!supabase) return { ok: true };
   if (!userId) return { ok: false, error: "Not signed in" };
+  // Story files are not linked to the account row, so remove them before the account goes.
+  const admin = getSupabaseAdminClient();
+  if (admin) {
+    const { data: files } = await admin.storage.from("stories").list(userId, { limit: 1000 });
+    if (files?.length) await admin.storage.from("stories").remove(files.map((f) => `${userId}/${f.name}`));
+  }
   const { error } = await supabase.rpc("delete_own_account");
   if (error) return { ok: false, error: error.message };
   await supabase.auth.signOut();
@@ -165,9 +183,19 @@ export async function sendConnection(targetId: string): Promise<Result> {
   if (skipped) return skipped;
   const { supabase, userId } = await client();
   if (!supabase || !userId) return { ok: true };
+  if ((await blockedEitherWay(userId)).has(targetId)) return { ok: false, error: "You can't connect with this person" };
   const { error } = await supabase.from("connections").insert({ requester_id: userId, addressee_id: targetId, status: "pending" });
   if (error) return { ok: false, error: error.message };
+  await notify(userId, targetId, "connection_request");
   return { ok: true };
+}
+
+/** In-app notification from one member to another, carrying only the sender's display name. */
+async function notify(fromId: string, toId: string, kind: "connection_request" | "connection_accepted") {
+  const admin = getSupabaseAdminClient();
+  if (!admin) return;
+  const { data: me } = await admin.from("profiles").select("name").eq("id", fromId).single();
+  await admin.from("notifications").insert({ user_id: toId, kind, payload: { from: fromId, name: me?.name ?? "Someone" } });
 }
 
 export async function respondConnection(targetId: string, accept: boolean): Promise<Result> {
@@ -182,6 +210,7 @@ export async function respondConnection(targetId: string, accept: boolean): Prom
     .eq("addressee_id", userId)
     .eq("status", "pending");
   if (error) return { ok: false, error: error.message };
+  if (accept) await notify(userId, targetId, "connection_accepted");
   return { ok: true };
 }
 

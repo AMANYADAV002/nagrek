@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
@@ -11,10 +11,13 @@ import { LayeredAvatar } from "@/components/avatar/layered-avatar";
 import { Chip } from "@/components/glass/chip";
 import { GlassCard } from "@/components/glass/glass-card";
 import { GradientButton, GradientLink } from "@/components/glass/gradient-button";
+import { useNotifications } from "@/components/notifications/notifications-provider";
 import { ReportDialog } from "@/components/safety/report-dialog";
 import { AddStoryButton } from "@/components/stories/add-story-button";
 import { Textarea } from "@/components/ui/textarea";
 import { sendConnection, setFollow } from "@/lib/actions/account";
+import { submitFeedback } from "@/lib/actions/meeting";
+import { getStoryConsent, requestStoryConsent } from "@/lib/actions/stories";
 import { syncBackend } from "@/lib/db/remote";
 import { updateSession, useSession } from "@/lib/mock/session";
 import type { MockUser } from "@/lib/types";
@@ -29,8 +32,18 @@ const feedbackSchema = z.object({
   text: z.string().trim().max(500).optional(),
 });
 
-/** Required-but-skippable post-meeting screen. TODO(phase-5): persist to `feedback`; recompute trust score. */
-export function FeedbackForm({ meetingId, partner, food }: { meetingId: string; partner: MockUser; food: string }) {
+/** Required-but-skippable post-meeting screen. Live ratings are saved and update the partner's trust score. */
+export function FeedbackForm({
+  meetingId,
+  partner,
+  food,
+  live = false,
+}: {
+  meetingId: string;
+  partner: MockUser;
+  food: string;
+  live?: boolean;
+}) {
   const router = useRouter();
   const session = useSession();
   const [rating, setRating] = useState(0);
@@ -40,12 +53,29 @@ export function FeedbackForm({ meetingId, partner, food }: { meetingId: string; 
   const [error, setError] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [done, setDone] = useState(false);
-  const [consent, setConsent] = useState<"none" | "asking" | "granted">("none");
+  const [sending, setSending] = useState(false);
+  const [consent, setConsent] = useState<"none" | "asking" | "granted" | "declined">("none");
   const first = partner.name.split(" ")[0];
+  const { notes } = useNotifications();
+  const grantedNow = live && notes.some((n) => n.kind === "story_consent_granted" && n.payload.matchId === meetingId);
+  const shownConsent = grantedNow ? "granted" : consent;
 
-  function submit() {
+  useEffect(() => {
+    if (!live) return;
+    void getStoryConsent(meetingId).then((s) => {
+      if (s !== "none") setConsent(s === "pending" ? "asking" : s);
+    });
+  }, [live, meetingId]);
+
+  async function submit() {
     const parsed = feedbackSchema.safeParse({ rating, tags, text: text || undefined });
     if (!parsed.success) return setError(parsed.error.issues[0]?.message ?? "Invalid feedback");
+    if (live) {
+      setSending(true);
+      const res = await submitFeedback(meetingId, parsed.data);
+      setSending(false);
+      if (!res.ok) return setError(res.error);
+    }
     updateSession((s) => ({
       feedback: [...s.feedback, { meetingId, partnerId: partner.id, ...parsed.data, createdAt: new Date().toISOString() }],
     }));
@@ -110,7 +140,9 @@ export function FeedbackForm({ meetingId, partner, food }: { meetingId: string; 
                 </button>
                 <div className="flex gap-2">
                   <GradientButton variant="ghost" onClick={() => setDone(true)}>Skip</GradientButton>
-                  <GradientButton onClick={submit}>Submit</GradientButton>
+                  <GradientButton onClick={() => void submit()} disabled={sending}>
+                    {sending ? "Saving…" : "Submit"}
+                  </GradientButton>
                 </div>
               </div>
             </GlassCard>
@@ -150,27 +182,33 @@ export function FeedbackForm({ meetingId, partner, food }: { meetingId: string; 
                 <Camera className="size-5 text-peach" aria-hidden /> Set story of conversation
               </h2>
               <p className="text-sm text-soft">Meetings only become stories when both of you agree. Nothing was recorded.</p>
-              {consent === "none" && (
+              {shownConsent === "none" && (
                 <GradientButton
                   size="sm"
                   variant="glass"
-                  onClick={() => {
-                    // TODO(phase-6): store in `consents` and notify the partner for approval.
+                  onClick={async () => {
+                    if (!live) {
+                      setConsent("asking");
+                      setTimeout(() => setConsent("granted"), 1800);
+                      return;
+                    }
+                    const res = await requestStoryConsent(meetingId);
+                    if (!res.ok) return toast.error(res.error);
                     setConsent("asking");
-                    setTimeout(() => setConsent("granted"), 1800);
                   }}
                 >
                   Ask {first} for consent
                 </GradientButton>
               )}
-              {consent === "asking" && (
+              {shownConsent === "asking" && (
                 <p className="flex items-center gap-2 text-sm text-soft">
                   <Loader2 className="size-4 animate-spin text-peach" aria-hidden /> Waiting for {first} to agree…
                 </p>
               )}
-              {consent === "granted" && (
+              {shownConsent === "declined" && <p className="text-sm text-soft">{first} chose not to share this meeting. That&apos;s okay.</p>}
+              {shownConsent === "granted" && (
                 <div className="flex items-center gap-4">
-                  <AddStoryButton caption={`${food} with ${first}`} />
+                  <AddStoryButton caption={`${food} with ${first}`} matchId={live ? meetingId : undefined} />
                   <p className="text-sm">
                     <Check className="mr-1 inline size-4 text-peach" aria-hidden />
                     {first} agreed. Pick a photo or a short clip from the meetup.

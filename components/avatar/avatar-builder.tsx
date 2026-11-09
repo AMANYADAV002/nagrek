@@ -13,8 +13,12 @@ import {
   avatarCategories, avatarItems, backgrounds, hairColors, itemKey, outfitColors, skinTones,
   type AvatarCategory, type AvatarItem,
 } from "@/lib/config/avatar-items";
+import { saveAvatar } from "@/lib/actions/account";
 import { formatInr } from "@/lib/config/plans";
 import { updateSession, useSession } from "@/lib/mock/session";
+import { runCheckout } from "@/lib/payments/checkout-client";
+import { freePreview } from "@/lib/payments/mode";
+import { backendEnabled } from "@/lib/supabase/env";
 import { calculateStreak } from "@/lib/streak/calc";
 import type { AvatarConfig } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -30,7 +34,7 @@ function swatch(item: AvatarItem): string | undefined {
   return undefined;
 }
 
-/** Layered avatar builder. Paid items are one-time ₹ purchases. TODO(phase-3): Razorpay order + `user_avatar_inventory`. */
+/** Layered avatar builder. Paid items are one-time ₹ purchases through Razorpay; the database re-checks on save. */
 export function AvatarBuilder() {
   const session = useSession();
   const [draft, setDraft] = useState<AvatarConfig | null>(null);
@@ -64,13 +68,36 @@ export function AvatarBuilder() {
 
   async function buy() {
     if (!buying) return;
+    const item = buying;
     setPaying(true);
-    await new Promise((r) => setTimeout(r, 900));
-    updateSession((s) => ({ ownedItems: [...s.ownedItems, itemKey(buying)] }));
-    setDraft({ ...config, [buying.category]: buying.id });
-    toast.success(`${buying.label} unlocked`);
-    setPaying(false);
-    setBuying(null);
+    if (backendEnabled()) {
+      // Razorpay opens its own window; our dialog would trap focus away from it.
+      setBuying(null);
+      const result = await runCheckout({ kind: "avatar_item", category: item.category, itemId: item.id });
+      setPaying(false);
+      if (!result.ok) {
+        if (result.cancelled) toast.message("Payment cancelled. Nothing was charged.");
+        else toast.error(result.error);
+        return;
+      }
+    } else {
+      await new Promise((r) => setTimeout(r, 900));
+      setPaying(false);
+      setBuying(null);
+    }
+    updateSession((s) => ({ ownedItems: [...s.ownedItems, itemKey(item)] }));
+    setDraft({ ...config, [item.category]: item.id });
+    toast.success(`${item.label} unlocked`);
+  }
+
+  async function save() {
+    if (backendEnabled()) {
+      const saved = await saveAvatar(config);
+      if (!saved.ok) return toast.error(saved.error);
+    }
+    updateSession({ avatar: config });
+    setDraft(null);
+    toast.success("Avatar saved");
   }
 
   const items = avatarItems.filter((i) => i.category === category);
@@ -92,11 +119,7 @@ export function AvatarBuilder() {
             <GradientButton
               size="sm"
               disabled={!dirty}
-              onClick={() => {
-                updateSession({ avatar: config });
-                setDraft(null);
-                toast.success("Avatar saved");
-              }}
+              onClick={save}
             >
               <Save /> Save avatar
             </GradientButton>
@@ -166,9 +189,13 @@ export function AvatarBuilder() {
                 <LayeredAvatar config={{ ...config, [buying.category]: buying.id }} />
               </div>
               <DialogTitle className="text-xl">Unlock {buying.label}</DialogTitle>
-              <DialogDescription>One-time purchase · {formatInr(buying.priceInr)} (mock Razorpay)</DialogDescription>
+              <DialogDescription>
+                {freePreview()
+                  ? `Free during preview (normally ${formatInr(buying.priceInr)})`
+                  : `One-time purchase · ${formatInr(buying.priceInr)}${backendEnabled() ? " · paid securely with Razorpay" : " (demo, no real money)"}`}
+              </DialogDescription>
               <GradientButton className="w-full" onClick={buy} disabled={paying}>
-                <ShoppingBag /> {paying ? "Processing…" : `Pay ${formatInr(buying.priceInr)}`}
+                <ShoppingBag /> {paying ? "Processing…" : freePreview() ? "Unlock free" : `Pay ${formatInr(buying.priceInr)}`}
               </GradientButton>
             </div>
           )}

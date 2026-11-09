@@ -2,6 +2,7 @@ export type AnalyticsEvent =
   | "signup"
   | "onboarding_complete"
   | "payment"
+  | "craving"
   | "match"
   | "meeting_complete"
   | "story_posted"

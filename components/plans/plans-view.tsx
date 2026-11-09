@@ -9,7 +9,10 @@ import { Wordmark } from "@/components/brand/wordmark";
 import { GradientButton } from "@/components/glass/gradient-button";
 import { Eyebrow } from "@/components/glass/section-heading";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { loadPlans, saveMockPlan } from "@/lib/actions/account";
+import { loadPlans } from "@/lib/actions/account";
+import { runCheckout } from "@/lib/payments/checkout-client";
+import { freePreview } from "@/lib/payments/mode";
+import { daysLeft } from "@/lib/payments/plan-status";
 import { comparisonRows, formatInr, plans as fallbackPlans, type Plan } from "@/lib/config/plans";
 import { track } from "@/lib/analytics";
 import { updateSession, useSession } from "@/lib/mock/session";
@@ -34,26 +37,42 @@ export function PlansView() {
 
   async function pay(simulateFailure = false) {
     if (!checkout) return;
+    const plan = checkout;
     setStatus("processing");
-    // TODO(phase-3): create a Razorpay subscription server-side, open Razorpay Checkout,
-    // verify the signature server-side, and let the webhook update `subscriptions`.
+
+    if (backendEnabled()) {
+      // Razorpay opens its own window; our dialog would trap focus away from it.
+      setCheckout(null);
+      const result = await runCheckout({ kind: "plan", planId: plan.id });
+      if (!result.ok) {
+        if (result.cancelled) {
+          setStatus("idle");
+          toast.message("Payment cancelled. Nothing was charged.");
+          return;
+        }
+        setStatus("failed");
+        setCheckout(plan);
+        toast.error(result.error);
+        return;
+      }
+      updateSession({ plan: result.plan, planSince: result.planSince, planExpiresAt: result.planExpiresAt });
+      track("payment", { plan: plan.id, amount: plan.priceInr });
+      router.push(`/plans/success?plan=${plan.id}`);
+      return;
+    }
+
     await new Promise((r) => setTimeout(r, 1200));
     if (simulateFailure) {
       setStatus("failed");
       return;
     }
-    if (backendEnabled()) {
-      const saved = await saveMockPlan(checkout.id);
-      if (!saved.ok) {
-        setStatus("failed");
-        toast.error(saved.error ?? "Could not activate the plan");
-        return;
-      }
-    }
-    updateSession({ plan: checkout.id, planSince: new Date().toISOString() });
-    track("payment", { plan: checkout.id, amount: checkout.priceInr });
-    router.push(`/plans/success?plan=${checkout.id}`);
+    updateSession({ plan: plan.id, planSince: new Date().toISOString() });
+    track("payment", { plan: plan.id, amount: plan.priceInr });
+    router.push(`/plans/success?plan=${plan.id}`);
   }
+
+  const live = backendEnabled();
+  const free = live && freePreview();
 
   return (
     <main id="main" className="mx-auto max-w-6xl px-4 py-8 md:py-12">
@@ -62,6 +81,7 @@ export function PlansView() {
         {session?.plan && (
           <span className="rounded-full border border-peach/40 px-3 py-1 text-xs text-peach">
             Current: {catalog.find((p) => p.id === session.plan)?.name}
+            {session.planExpiresAt && ` · ${daysLeft(session.planExpiresAt)} days left`}
           </span>
         )}
       </div>
@@ -72,7 +92,7 @@ export function PlansView() {
           Pick your <span className="text-brand">appetite.</span>
         </h1>
         <p className="mx-auto max-w-md text-sm text-soft">
-          Prices are placeholders while we are in preview. Cancel anytime. Payments are processed by Razorpay.
+          Prices are placeholders while we are in preview. Each payment covers 30 days and never renews automatically. Payments are processed by Razorpay.
         </p>
       </div>
 
@@ -108,9 +128,11 @@ export function PlansView() {
               </div>
               <p className="mt-6 font-heading text-5xl tracking-tight">
                 {formatInr(p.priceInr)}
-                <span className="text-sm text-soft"> /month</span>
+                <span className="text-sm text-soft"> /30 days</span>
               </p>
-              <p className="mt-1 text-[10px] tracking-wider text-soft uppercase">Placeholder price</p>
+              <p className="mt-1 text-[10px] tracking-wider text-soft uppercase">
+                {free ? <span className="text-peach">Free during preview</span> : "Placeholder price"}
+              </p>
               <ul className="mt-6 flex-1 space-y-2.5 text-sm">
                 {p.perks.map((perk) => (
                   <li key={perk} className="flex gap-2.5">
@@ -121,13 +143,13 @@ export function PlansView() {
               <GradientButton
                 className="mt-7 w-full"
                 variant={p.highlight ? "brand" : "glass"}
-                disabled={current}
+                disabled={(current && !live) || status === "processing"}
                 onClick={() => {
                   setStatus("idle");
                   setCheckout(p);
                 }}
               >
-                {current ? "Your plan" : `Choose ${p.name}`}
+                {current ? (live ? "Extend 30 days" : "Your plan") : `Choose ${p.name}`}
               </GradientButton>
             </motion.article>
           );
@@ -179,11 +201,17 @@ export function PlansView() {
             <div className="space-y-5">
               <div className="space-y-1">
                 <DialogTitle className="text-xl">Checkout — {checkout.name}</DialogTitle>
-                <DialogDescription>Mock Razorpay checkout. No real money moves in Phase 1.</DialogDescription>
+                <DialogDescription>
+                  {!live
+                    ? "Demo checkout. No real money moves without a backend."
+                    : free
+                      ? "Free preview: no payment needed. Your plan starts right away for 30 days."
+                      : "You'll pay in Razorpay's secure window. Cards, UPI and netbanking are supported."}
+                </DialogDescription>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                 <div className="flex justify-between text-sm">
-                  <span>{checkout.name} plan · monthly</span>
+                  <span>{checkout.name} plan · 30 days</span>
                   <span className="font-semibold">{formatInr(checkout.priceInr)}</span>
                 </div>
                 <div className="mt-2 flex justify-between text-xs text-soft">
@@ -197,26 +225,35 @@ export function PlansView() {
                 </p>
               )}
               <GradientButton className="w-full" size="lg" onClick={() => pay(false)} disabled={status === "processing"}>
-                <CreditCard /> {status === "processing" ? "Processing…" : status === "failed" ? "Retry payment" : `Pay ${formatInr(checkout.priceInr)}`}
+                <CreditCard />{" "}
+                {status === "processing"
+                  ? "Processing…"
+                  : status === "failed"
+                    ? "Retry"
+                    : free
+                      ? `Activate ${checkout.name} free`
+                      : `Pay ${formatInr(checkout.priceInr)}`}
               </GradientButton>
               <div className="flex items-center justify-between text-xs text-soft">
                 <span className="flex items-center gap-1.5">
                   <ShieldCheck className="size-3.5 text-peach" aria-hidden /> Secured by Razorpay
                 </span>
-                <button
-                  type="button"
-                  className="underline hover:text-cream"
-                  onClick={() => {
-                    toast.message("Simulating a failed payment");
-                    pay(true);
-                  }}
-                  disabled={status === "processing"}
-                >
-                  Simulate failure
-                </button>
+                {!live && (
+                  <button
+                    type="button"
+                    className="underline hover:text-cream"
+                    onClick={() => {
+                      toast.message("Simulating a failed payment");
+                      pay(true);
+                    }}
+                    disabled={status === "processing"}
+                  >
+                    Simulate failure
+                  </button>
+                )}
               </div>
               <p className="flex items-center gap-1.5 text-[10px] text-soft">
-                <Lock className="size-3" aria-hidden /> Cancel anytime from your profile. Renews monthly.
+                <Lock className="size-3" aria-hidden /> One-time payment for 30 days. No auto-renewal, nothing to cancel.
               </p>
             </div>
           )}

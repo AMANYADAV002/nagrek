@@ -1,9 +1,14 @@
 "use client";
 
+import { useEffect, useSyncExternalStore } from "react";
+import { toast } from "sonner";
 import type { StoryGroup } from "@/components/story-viewer/story-viewer";
+import { deleteStory, loadStories, markStorySeen, publishStory } from "@/lib/actions/stories";
 import { mockStories } from "@/lib/mock/stories";
 import { mockUsers } from "@/lib/mock/users";
-import type { SessionState } from "@/lib/mock/session";
+import { updateSession, type SessionState } from "@/lib/mock/session";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { backendEnabled } from "@/lib/supabase/env";
 import type { Story } from "@/lib/types";
 
 export const STORY_TTL_MS = 24 * 3_600_000;
@@ -44,15 +49,127 @@ export function groupSeen(group: StoryGroup, seen: string[]) {
   return group.stories.every((s) => seen.includes(s.id));
 }
 
-/** Client-side compression: downscale to 1080px and re-encode as JPEG (TODO(phase-6): upload to Supabase Storage). */
-export async function compressImage(file: File, maxSide = 1080, quality = 0.8): Promise<string> {
+/** Sources next/image can't optimise: local previews and short-lived signed Storage URLs. */
+export function rawStorySrc(src: string) {
+  return src.startsWith("data:") || src.startsWith("blob:") || src.includes("/storage/v1/");
+}
+
+// ---------------------------------------------------------------------------
+// Live stories (Supabase). Signed URLs last an hour, so the list refreshes every 30 minutes.
+// ---------------------------------------------------------------------------
+
+let liveGroups: StoryGroup[] | null = null;
+let loading = false;
+const listeners = new Set<() => void>();
+const emit = () => listeners.forEach((l) => l());
+const subscribe = (l: () => void) => {
+  listeners.add(l);
+  return () => listeners.delete(l);
+};
+
+export async function refreshLiveStories() {
+  if (loading) return;
+  loading = true;
+  try {
+    liveGroups = await loadStories();
+  } finally {
+    loading = false;
+    emit();
+  }
+}
+
+/** Story groups for the current mode: Supabase when the backend is on, the demo set otherwise. */
+export function useStoryGroups(session: SessionState | null): StoryGroup[] {
+  const live = backendEnabled();
+  const groups = useSyncExternalStore(subscribe, () => liveGroups, () => null);
+  useEffect(() => {
+    if (!live) return;
+    if (liveGroups === null) void refreshLiveStories();
+    const timer = setInterval(() => void refreshLiveStories(), 30 * 60_000);
+    return () => clearInterval(timer);
+  }, [live]);
+  if (!session) return [];
+  if (!live) return buildStoryGroups(session);
+  const reported = new Set(session.reports.filter((r) => r.targetType === "story").map((r) => r.targetId));
+  return (groups ?? [])
+    .filter((g) => !session.blocked.includes(g.userId))
+    .map((g) => ({ ...g, stories: g.stories.filter((s) => !reported.has(s.id)) }))
+    .filter((g) => g.stories.length);
+}
+
+/** Seen and delete handlers shared by the row, the feed and profiles. */
+export function storyHandlers() {
+  const live = backendEnabled();
+  return {
+    onSeen: (id: string) => {
+      updateSession((s) => (s.seenStories.includes(id) ? {} : { seenStories: [...s.seenStories, id] }));
+      if (live) void markStorySeen(id);
+    },
+    onDelete: (id: string) => {
+      if (!live) return updateSession((s) => ({ myStories: s.myStories.filter((x) => x.id !== id) }));
+      void deleteStory(id).then((res) => {
+        if (!res.ok) toast.error(res.error);
+        void refreshLiveStories();
+      });
+    },
+  };
+}
+
+const EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+  "video/quicktime": "mov",
+};
+
+/** Uploads into the caller's own Storage folder, then asks the server to publish it. */
+export async function uploadLiveStory(
+  userId: string,
+  blob: Blob,
+  kind: "image" | "video",
+  caption?: string,
+  matchId?: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return { ok: false, error: "Backend not configured" };
+  const ext = EXT[blob.type];
+  if (!ext) return { ok: false, error: "Use a JPG, PNG, WebP, MP4, WebM or MOV file." };
+  const path = `${userId}/${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage.from("stories").upload(path, blob, { contentType: blob.type, upsert: false });
+  if (error) return { ok: false, error: error.message };
+  const res = await publishStory({ path, kind, caption, matchId });
+  if (!res.ok) {
+    await supabase.storage.from("stories").remove([path]);
+    return res;
+  }
+  await refreshLiveStories();
+  return { ok: true };
+}
+
+/** Client-side compression: downscale to 1080px and re-encode as JPEG. */
+export async function compressImageBlob(file: File, maxSide = 1080, quality = 0.8): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);
   canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", quality);
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not compress image"))), "image/jpeg", quality),
+  );
+}
+
+/** Demo mode keeps stories in the browser as data URLs. */
+export async function compressImage(file: File, maxSide = 1080, quality = 0.8): Promise<string> {
+  const blob = await compressImageBlob(file, maxSide, quality);
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("Could not read image"));
+    reader.readAsDataURL(blob);
+  });
 }
 
 export function videoDuration(url: string): Promise<number> {

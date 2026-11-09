@@ -5,6 +5,7 @@ import { GradientLink } from "@/components/glass/gradient-button";
 import { cravings, marqueePairs } from "@/lib/data/cravings";
 import { faqs } from "@/lib/data/faq";
 import { formatInr, plans } from "@/lib/config/plans";
+import { freePreview } from "@/lib/payments/mode";
 import { cn } from "@/lib/utils";
 
 function Kicker({ left, right }: { left: string; right: string }) {
@@ -121,9 +122,10 @@ export function Marquee() {
 }
 
 export function PlansTeaser() {
+  const free = freePreview();
   return (
     <section id="plans" className="mx-auto max-w-[1440px] px-[6%] py-20" data-reveal>
-      <Kicker left="03 / Plans" right="Placeholder prices" />
+      <Kicker left="03 / Plans" right={free ? "Free during early access" : "30-day passes · no auto-renewal"} />
       <h2 className="mb-10 text-4xl font-medium">
         Pick your <span className="text-brand">appetite.</span>
       </h2>
@@ -139,8 +141,14 @@ export function PlansTeaser() {
             <h3 className="text-xl font-medium">{p.name}</h3>
             <p className="text-xs text-soft">{p.tagline}</p>
             <p className="mt-5 font-heading text-4xl">
-              {formatInr(p.priceInr)}
-              <span className="text-sm text-soft">/mo</span>
+              {free ? (
+                <>
+                  Free <span className="text-base text-soft line-through">{formatInr(p.priceInr)}</span>
+                </>
+              ) : (
+                formatInr(p.priceInr)
+              )}
+              <span className="text-sm text-soft">/30 days</span>
             </p>
             <ul className="mt-5 space-y-2 text-sm">
               {p.perks.slice(0, 4).map((perk) => (

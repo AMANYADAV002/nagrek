@@ -1,5 +1,7 @@
-import { defaultAvatar } from "@/lib/config/avatar-items";
+import { defaultAvatar, itemKey, type AvatarCategory } from "@/lib/config/avatar-items";
 import type { ConnectionStatus, FuturePlan, SessionState, WishItem } from "@/lib/mock/session";
+import { activePlan } from "@/lib/payments/plan-status";
+import type { StreakEvent } from "@/lib/streak/calc";
 import type { AvatarConfig, Consent, PlanId, Preferences } from "@/lib/types";
 import { roundCoord } from "@/lib/validation/onboarding";
 import type { OnboardingInput } from "@/lib/validation/onboarding";
@@ -70,6 +72,7 @@ interface ProfileRow {
   avatar: AvatarConfig;
   plan_id: PlanId | null;
   plan_since: string | null;
+  plan_expires_at: string | null;
   onboarded_at: string | null;
   notifications_enabled: boolean;
 }
@@ -109,7 +112,10 @@ export function accountFromRows(input: {
   muted: string[];
   wishes: WishRow[];
   plans: PlanRow[];
+  inventory?: { category: string; item_id: string }[];
+  streakEvents?: StreakEvent[];
 }): SessionState {
+  const plan = activePlan(input.profile.plan_id, input.profile.plan_expires_at);
   const preferences: Preferences | null = input.preferences
     ? {
         foodInterests: input.preferences.food_interests,
@@ -165,11 +171,12 @@ export function accountFromRows(input: {
     preferences,
     consent: input.consent,
     welcomed: !!input.profile.onboarded_at,
-    plan: input.profile.plan_id,
-    planSince: input.profile.plan_since,
+    plan,
+    planSince: plan ? input.profile.plan_since : null,
+    planExpiresAt: plan ? input.profile.plan_expires_at : null,
     avatar: input.profile.avatar ?? defaultAvatar,
-    ownedItems: [],
-    streakEvents: [],
+    ownedItems: (input.inventory ?? []).map((i) => itemKey({ category: i.category as AvatarCategory, id: i.item_id })),
+    streakEvents: input.streakEvents ?? [],
     claimedRewards: [],
     wishlist,
     futurePlans,

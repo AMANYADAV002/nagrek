@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Coffee, Gift, Hotel, Lock, Snowflake, Ticket, Trophy, Utensils } from "lucide-react";
 import { toast } from "sonner";
@@ -14,7 +14,9 @@ import { getPlan } from "@/lib/config/plans";
 import { levelFor, STREAK_MILESTONES } from "@/lib/config/streak";
 import { fireConfetti } from "@/lib/confetti";
 import { track } from "@/lib/analytics";
+import { claimReward, loadLeaderboard, loadRewards, setLeaderboardOptIn, type LeaderRow, type RewardsData } from "@/lib/actions/rewards";
 import { rewards, sponsorFor } from "@/lib/mock/rewards";
+import { backendEnabled } from "@/lib/supabase/env";
 import { mockUsers } from "@/lib/mock/users";
 import { updateSession, useSession } from "@/lib/mock/session";
 import { calculateStreak, milestoneProgress, rewardEligibility } from "@/lib/streak/calc";
@@ -31,28 +33,61 @@ const reasonText = {
 
 export function StreakView() {
   const session = useSession();
-  const [leaderboard, setLeaderboard] = useState(false);
+  const live = backendEnabled();
+  const [demoLeaderboard, setDemoLeaderboard] = useState(false);
+  const [data, setData] = useState<RewardsData | null>(null);
+  const [board, setBoard] = useState<{ rows: LeaderRow[]; optedIn: boolean } | null>(null);
+  const [claiming, setClaiming] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!live) return;
+    void loadRewards().then(setData);
+    void loadLeaderboard().then(setBoard);
+  }, [live]);
+
   if (!session) return null;
 
   const streak = calculateStreak(session.streakEvents);
   const { next, prev, progress } = milestoneProgress(streak);
   const level = levelFor(streak);
   const plan = getPlan(session.plan);
-  const claimedIds = session.claimedRewards.map((c) => c.rewardId);
+  const rewardList = live ? (data?.rewards ?? []) : rewards;
+  const sponsorOf = (id: string) => (live ? data?.sponsors.find((s) => s.id === id) : sponsorFor(id));
+  const claims = live ? (data?.claimed ?? []) : session.claimedRewards.map((c) => ({ ...c, code: null as string | null }));
+  const claimedIds = claims.map((c) => c.rewardId);
   const month = new Date().toLocaleString("en-IN", { month: "long" });
 
-  function claim(rewardId: string) {
-    // TODO(phase-6): server action issues a one-time code from the coupon pool (never shipped in the client bundle).
-    updateSession((s) => ({ claimedRewards: [...s.claimedRewards, { rewardId, claimedAt: new Date().toISOString() }] }));
+  async function claim(rewardId: string) {
+    if (live) {
+      setClaiming(rewardId);
+      const res = await claimReward(rewardId);
+      setClaiming(null);
+      if (!res.ok) return toast.error(res.error);
+      setData(await loadRewards());
+      toast.success(`Reward claimed! Your code: ${res.code}`);
+    } else {
+      updateSession((s) => ({ claimedRewards: [...s.claimedRewards, { rewardId, claimedAt: new Date().toISOString() }] }));
+      toast.success("Reward claimed! (Demo mode: no real code is issued.)");
+    }
     track("reward_claimed", { rewardId });
     fireConfetti({ particleCount: 180, spread: 100 });
-    toast.success("Reward claimed! Your code will be issued securely in Phase 6.");
   }
 
-  const board = [
-    ...mockUsers.map((u) => ({ id: u.id, name: u.name, streak: u.streak })),
-    { id: "me", name: session.user?.name ?? "You", streak },
-  ].sort((a, b) => b.streak - a.streak);
+  async function toggleBoard(on: boolean) {
+    if (!live) return setDemoLeaderboard(on);
+    setBoard((b) => (b ? { ...b, optedIn: on } : b));
+    const res = await setLeaderboardOptIn(on);
+    if (!res.ok) toast.error(res.error);
+    setBoard(await loadLeaderboard());
+  }
+
+  const optedIn = live ? !!board?.optedIn : demoLeaderboard;
+  const rows: LeaderRow[] = live
+    ? (board?.rows ?? [])
+    : [
+        ...mockUsers.map((u) => ({ id: u.id, name: u.name, streak: u.streak, isMe: false })),
+        ...(demoLeaderboard ? [{ id: "me", name: session.user?.name ?? "You", streak, isMe: true }] : []),
+      ].sort((a, b) => b.streak - a.streak);
 
   return (
     <div className="space-y-8">
@@ -115,8 +150,9 @@ export function StreakView() {
           <Gift className="size-6 text-peach" aria-hidden /> Sponsor rewards
         </h2>
         <Stagger className="grid gap-4 md:grid-cols-2">
-          {rewards.map((r) => {
-            const sponsor = sponsorFor(r.sponsorId);
+          {rewardList.map((r) => {
+            const sponsor = sponsorOf(r.sponsorId);
+            const code = claims.find((c) => c.rewardId === r.id)?.code;
             const Icon = sponsor ? kindIcon[sponsor.kind] : Ticket;
             const elig = rewardEligibility(r, { streak, plan: session.plan, claimedIds });
             return (
@@ -137,7 +173,9 @@ export function StreakView() {
                       {r.minStreak}-day streak · {getPlan(r.minPlan)?.name}+ · {r.stock} left
                     </span>
                     {elig.eligible ? (
-                      <GradientButton size="sm" onClick={() => claim(r.id)}>Claim</GradientButton>
+                      <GradientButton size="sm" disabled={claiming === r.id} onClick={() => void claim(r.id)}>
+                        {claiming === r.id ? "Claiming…" : "Claim"}
+                      </GradientButton>
                     ) : (
                       <span className={cn("flex items-center gap-1 rounded-full px-3 py-1.5", elig.reason === "claimed" ? "bg-green-500/15 text-green-300" : "bg-white/5 text-soft")}>
                         {elig.reason !== "claimed" && <Lock className="size-3" aria-hidden />}
@@ -145,11 +183,17 @@ export function StreakView() {
                       </span>
                     )}
                   </div>
+                  {code && (
+                    <p className="rounded-xl border border-dashed border-peach/50 bg-peach/5 px-3 py-2 text-center font-mono text-sm tracking-wider text-peach">
+                      {code}
+                    </p>
+                  )}
                 </GlassCard>
               </StaggerItem>
             );
           })}
         </Stagger>
+        {live && !data && <p className="text-sm text-soft">Loading rewards…</p>}
         <p className="text-xs text-soft">Your plan: {plan?.name ?? "none"}. Higher plans unlock higher-value rewards.</p>
       </section>
 
@@ -157,22 +201,22 @@ export function StreakView() {
         <div className="flex items-center justify-between gap-4">
           <h2 className="text-lg font-medium">Leaderboard</h2>
           <label className="flex items-center gap-2 text-xs text-soft">
-            Show me on the leaderboard <Switch checked={leaderboard} onCheckedChange={setLeaderboard} />
+            Show me on the leaderboard <Switch checked={optedIn} onCheckedChange={(on) => void toggleBoard(on)} />
           </label>
         </div>
+        {live && board && rows.length === 0 && <p className="text-sm text-soft">No one has opted in this month yet. Be the first!</p>}
         <ol className="space-y-2">
-          {board
-            .filter((b) => b.id !== "me" || leaderboard)
-            .slice(0, 6)
+          {rows
+            .slice(0, live ? 10 : 6)
             .map((b, i) => (
-              <li key={b.id} className={cn("flex items-center gap-3 rounded-xl px-3 py-2 text-sm", b.id === "me" ? "bg-peach/10" : "bg-white/[0.03]")}>
+              <li key={b.id} className={cn("flex items-center gap-3 rounded-xl px-3 py-2 text-sm", b.isMe ? "bg-peach/10" : "bg-white/[0.03]")}>
                 <span className="w-6 font-heading text-peach">{i + 1}</span>
                 <span className="flex-1">{b.name}</span>
                 <span className="text-soft">🔥 {b.streak}</span>
               </li>
             ))}
         </ol>
-        <p className="text-[11px] text-soft">Opt-in only. Other users appear here with their consent (mock data).</p>
+        <p className="text-[11px] text-soft">Opt-in only. Only first names and streaks are shown{live ? "" : " (demo data)"}.</p>
       </GlassCard>
     </div>
   );

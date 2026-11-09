@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, Heart, Loader2, SkipForward } from "lucide-react";
@@ -9,40 +9,99 @@ import { LayeredAvatar } from "@/components/avatar/layered-avatar";
 import { GradientButton } from "@/components/glass/gradient-button";
 import { cravingEmoji } from "@/lib/data/cravings";
 import { toneLabel } from "@/lib/format";
+import { getMatchState, respondMatch, type Decision, type MatchStatus } from "@/lib/actions/matching";
+import { MATCH_DECISION_MS } from "@/lib/matching/live";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { MockUser } from "@/lib/types";
 
-const WINDOW_S = 10;
+const DEMO_WINDOW_S = 10;
+const LIVE_WINDOW_S = MATCH_DECISION_MS / 1000;
+
+type LiveState = { status: MatchStatus; mine: Decision; theirs: Decision; decideBy: string };
+
+const secondsUntil = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 1000));
 
 /**
- * 10-second blurred preview. The video stays blurred until BOTH people accept.
- * TODO(phase-4): accept/skip are written to `matches` and synced over Realtime.
+ * Blurred preview. The partner stays blurred until BOTH people accept.
+ * Demo: 10 s and a simulated partner. Live: decisions are stored on `matches` and arrive over Realtime.
  */
-export function PreMeet({ matchId, partner, food }: { matchId: string; partner: MockUser; food: string }) {
+export function PreMeet({ matchId, partner, food, live }: { matchId: string; partner: MockUser; food: string; live?: LiveState }) {
   const router = useRouter();
-  const [left, setLeft] = useState(WINDOW_S);
-  const [mine, setMine] = useState<"pending" | "accepted">("pending");
-  const [theirs, setTheirs] = useState<"pending" | "accepted">("pending");
-  const bothAccepted = mine === "accepted" && theirs === "accepted";
-  const roomUrl = `/room/${matchId}?with=${partner.id}&food=${encodeURIComponent(food)}`;
+  const windowS = live ? LIVE_WINDOW_S : DEMO_WINDOW_S;
+  const [left, setLeft] = useState(() => (live ? secondsUntil(live.decideBy) : DEMO_WINDOW_S));
+  const [mine, setMine] = useState<Decision>(live?.mine ?? "pending");
+  const [theirs, setTheirs] = useState<Decision>(live?.theirs ?? "pending");
+  const [status, setStatus] = useState<MatchStatus>(live?.status ?? "pending");
+  const bothAccepted = live ? status === "live" || status === "ended" : mine === "accepted" && theirs === "accepted";
+  const roomUrl = live ? `/room/${matchId}` : `/room/${matchId}?with=${partner.id}&food=${encodeURIComponent(food)}`;
+  const decided = useRef(false);
 
   useEffect(() => {
     if (bothAccepted) return;
-    const t = setInterval(() => setLeft((l) => Math.max(0, l - 1)), 1000);
+    const t = setInterval(() => setLeft((l) => (live ? secondsUntil(live.decideBy) : Math.max(0, l - 1))), 1000);
     return () => clearInterval(t);
-  }, [bothAccepted]);
+  }, [bothAccepted, live]);
 
-  // Mock partner decision: accepts ~3s in.
+  // Demo partner accepts ~3 s in.
   useEffect(() => {
+    if (live) return;
     const t = setTimeout(() => setTheirs("accepted"), 3000);
     return () => clearTimeout(t);
-  }, []);
+  }, [live]);
+
+  // Live: decisions stream in over Realtime, with a slow poll in case the socket drops.
+  useEffect(() => {
+    if (!live) return;
+    const apply = (s: { status: MatchStatus; mine: Decision; theirs: Decision }) => {
+      setStatus(s.status);
+      setMine(s.mine);
+      setTheirs(s.theirs);
+    };
+    const supabase = getSupabaseBrowserClient();
+    const channel = supabase
+      ?.channel(`match:${matchId}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "matches", filter: `id=eq.${matchId}` }, () => {
+        void getMatchState(matchId).then((s) => s && apply(s));
+      })
+      .subscribe();
+    const poll = setInterval(() => void getMatchState(matchId).then((s) => s && apply(s)), 4000);
+    return () => {
+      clearInterval(poll);
+      if (channel) void supabase?.removeChannel(channel);
+    };
+  }, [live, matchId]);
 
   useEffect(() => {
-    if (left === 0 && !bothAccepted) {
-      toast.message("Time's up — this match was skipped.");
-      router.replace("/dashboard");
+    if (!live || status !== "skipped" || decided.current) return;
+    decided.current = true;
+    toast.message(mine === "skipped" ? "Skipped. We will find someone else." : "This match didn't happen this time. Try another craving.");
+    router.replace("/dashboard");
+  }, [live, status, mine, router]);
+
+  useEffect(() => {
+    if (left > 0 || bothAccepted || decided.current) return;
+    decided.current = true;
+    toast.message("Time's up — this match was skipped.");
+    if (live) void respondMatch(matchId, "skipped");
+    router.replace("/dashboard");
+  }, [left, bothAccepted, live, matchId, router]);
+
+  async function decide(decision: "accepted" | "skipped") {
+    setMine(decision);
+    if (!live) {
+      if (decision === "skipped") {
+        toast.message("Skipped. We will find someone else.");
+        router.replace("/dashboard");
+      }
+      return;
     }
-  }, [left, bothAccepted, router]);
+    const res = await respondMatch(matchId, decision);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    setStatus(res.status);
+  }
 
   useEffect(() => {
     if (!bothAccepted) return;
@@ -87,7 +146,7 @@ export function PreMeet({ matchId, partner, food }: { matchId: string; partner: 
                   strokeWidth="6"
                   strokeLinecap="round"
                   strokeDasharray={C}
-                  strokeDashoffset={C * (1 - left / WINDOW_S)}
+                  strokeDashoffset={C * (1 - Math.min(1, left / windowS))}
                   className="transition-[stroke-dashoffset] duration-1000 ease-linear"
                 />
                 <defs>
@@ -124,14 +183,11 @@ export function PreMeet({ matchId, partner, food }: { matchId: string; partner: 
             variant="glass"
             size="lg"
             className="flex-1"
-            onClick={() => {
-              toast.message("Skipped. We will find someone else.");
-              router.replace("/dashboard");
-            }}
+            onClick={() => void decide("skipped")}
           >
             <SkipForward /> Skip
           </GradientButton>
-          <GradientButton size="lg" className="flex-1" onClick={() => setMine("accepted")}>
+          <GradientButton size="lg" className="flex-1" onClick={() => void decide("accepted")}>
             <Check /> Accept
           </GradientButton>
         </div>

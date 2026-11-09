@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { redirectFor, type Requirement } from "@/lib/guards";
+import { activePlan } from "@/lib/payments/plan-status";
 import type { PlanId } from "@/lib/types";
 
 /**
@@ -50,11 +51,11 @@ export async function proxy(request: NextRequest) {
   let onboarded = false;
   let plan: PlanId | null = null;
   if (auth.user) {
-    const { data, error } = await supabase.from("profiles").select("onboarded_at, plan_id").eq("id", auth.user.id).maybeSingle();
+    const { data, error } = await supabase.from("profiles").select("onboarded_at, plan_id, plan_expires_at").eq("id", auth.user.id).maybeSingle();
     // Missing tables (migration not run) should not lock every route.
     if (error) return response;
     onboarded = !!data?.onboarded_at;
-    plan = (data?.plan_id as PlanId | null) ?? null;
+    plan = activePlan(data?.plan_id, data?.plan_expires_at);
   }
 
   const dest = redirectFor(rule.need, { signedIn: !!auth.user, onboarded, plan });

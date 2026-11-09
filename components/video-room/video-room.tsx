@@ -15,23 +15,49 @@ import { cravingEmoji } from "@/lib/data/cravings";
 import { icebreakers } from "@/lib/data/icebreakers";
 import { track } from "@/lib/analytics";
 import { toneLabel } from "@/lib/format";
+import { endMeeting } from "@/lib/actions/meeting";
 import { updateSession, useSession } from "@/lib/mock/session";
 import type { MockUser } from "@/lib/types";
+import { usePeer } from "@/lib/webrtc/use-peer";
+import type { PeerState } from "@/lib/webrtc/types";
 import { cn } from "@/lib/utils";
 
 type CamState = "requesting" | "on" | "denied" | "unavailable";
 type Net = "good" | "weak" | "reconnecting";
 
+const netFromPeer: Record<PeerState, Net> = {
+  waiting: "good",
+  connecting: "good",
+  connected: "good",
+  weak: "weak",
+  reconnecting: "reconnecting",
+  failed: "reconnecting",
+  left: "good",
+};
+
 /**
- * Phase 1 room: real local camera preview + a mocked remote participant.
- * TODO(phase-5): replace the remote tile with RTCPeerConnection streams via lib/webrtc.
+ * Live: a real one-to-one WebRTC call with the matched person (lib/webrtc/use-peer.ts).
+ * Demo: real local camera preview and a simulated partner. Calls are never recorded.
  */
-export function VideoRoom({ meetingId, partner, food }: { meetingId: string; partner: MockUser; food: string }) {
+export function VideoRoom({
+  meetingId,
+  partner,
+  food,
+  live,
+}: {
+  meetingId: string;
+  partner: MockUser;
+  food: string;
+  live?: { me: string; role: "a" | "b" };
+}) {
   const router = useRouter();
   const session = useSession();
   const plan = getPlan(session?.plan);
   const localVideo = useRef<HTMLVideoElement>(null);
+  const remoteVideo = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
+  const ending = useRef(false);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [cam, setCam] = useState<CamState>("requesting");
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
@@ -50,8 +76,10 @@ export function VideoRoom({ meetingId, partner, food }: { meetingId: string; par
     }
     try {
       const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: true });
+      stream.current?.getTracks().forEach((tr) => tr.stop());
       stream.current = s;
       if (localVideo.current) localVideo.current.srcObject = s;
+      setLocalStream(s);
       setCam("on");
     } catch (e) {
       setCam((e as DOMException)?.name === "NotAllowedError" ? "denied" : "unavailable");
@@ -71,8 +99,22 @@ export function VideoRoom({ meetingId, partner, food }: { meetingId: string; par
     return () => clearInterval(t);
   }, []);
 
-  // Mock partner "speaking" + an occasional network wobble to exercise the warning UI.
+  const peer = usePeer({
+    matchId: meetingId,
+    me: live?.me ?? "",
+    partnerId: partner.id,
+    role: live?.role ?? "a",
+    localStream,
+    enabled: !!live && cam !== "requesting",
+  });
+
   useEffect(() => {
+    if (remoteVideo.current && peer.remoteStream) remoteVideo.current.srcObject = peer.remoteStream;
+  }, [peer.remoteStream]);
+
+  // Demo only: a simulated partner "speaking" and a network wobble to exercise the warning UI.
+  useEffect(() => {
+    if (live) return;
     const talk = setInterval(() => setSpeaking((s) => !s), 2600);
     const wobble = setTimeout(() => {
       setNet("weak");
@@ -83,7 +125,7 @@ export function VideoRoom({ meetingId, partner, food }: { meetingId: string; par
       clearInterval(talk);
       clearTimeout(wobble);
     };
-  }, []);
+  }, [live]);
 
   useEffect(() => {
     stream.current?.getAudioTracks().forEach((t) => (t.enabled = micOn));
@@ -92,13 +134,39 @@ export function VideoRoom({ meetingId, partner, food }: { meetingId: string; par
     stream.current?.getVideoTracks().forEach((t) => (t.enabled = camOn));
   }, [camOn]);
 
-  function endCall() {
+  const endCall = useCallback(async () => {
+    if (ending.current) return;
+    ending.current = true;
+    peer.leave();
     stream.current?.getTracks().forEach((t) => t.stop());
+    track("meeting_complete", { meetingId, seconds: elapsed });
+    if (live) {
+      const res = await endMeeting(meetingId);
+      if (res.ok) updateSession({ streakEvents: res.streakEvents });
+      router.push(`/feedback/${meetingId}`);
+      return;
+    }
     // Streak rule: a completed meeting counts for today (see lib/streak/calc.ts).
     updateSession((s) => ({ streakEvents: [...s.streakEvents, { type: "meeting_completed", at: new Date().toISOString() }] }));
-    track("meeting_complete", { meetingId, seconds: elapsed });
     router.push(`/feedback/${meetingId}?with=${partner.id}&food=${encodeURIComponent(food)}`);
-  }
+  }, [peer, meetingId, elapsed, live, router, partner.id, food]);
+
+  useEffect(() => {
+    if (peer.state !== "left" || ending.current) return;
+    toast.message(`${partner.name.split(" ")[0]} left the table.`);
+    void endCall();
+  }, [peer.state, partner.name, endCall]);
+
+  const shownNet: Net = live ? netFromPeer[peer.state] : net;
+  const remoteLabel = !live
+    ? `${partner.area} · demo participant`
+    : peer.state === "waiting"
+      ? `Waiting for ${partner.name.split(" ")[0]} to join…`
+      : peer.state === "connecting"
+        ? "Connecting…"
+        : peer.state === "failed"
+          ? "Couldn't connect. Check your network or try again."
+          : partner.area;
 
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
@@ -117,18 +185,26 @@ export function VideoRoom({ meetingId, partner, food }: { meetingId: string; par
         <span
           className={cn(
             "glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs",
-            net === "weak" && "text-amber-300",
-            net === "reconnecting" && "text-red-300",
+            shownNet === "weak" && "text-amber-300",
+            shownNet === "reconnecting" && "text-red-300",
           )}
           role="status"
         >
-          {net === "good" ? <Wifi className="size-3.5" /> : net === "weak" ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />}
-          {net === "good" ? "Good connection" : net === "weak" ? "Weak network" : "Reconnecting…"}
+          {shownNet === "reconnecting" ? <WifiOff className="size-3.5" /> : <Wifi className="size-3.5" />}
+          {shownNet === "good" ? "Good connection" : shownNet === "weak" ? "Weak network" : "Reconnecting…"}
         </span>
       </div>
 
-      {/* remote tile (mock) */}
+      {/* remote tile: live video when connected, otherwise the partner's avatar */}
       <div className="relative flex-1 overflow-hidden">
+        {live && (
+          <video
+            ref={remoteVideo}
+            autoPlay
+            playsInline
+            className={cn("absolute inset-0 z-[1] size-full object-cover", !peer.remoteStream && "hidden")}
+          />
+        )}
         <motion.div
           className="absolute inset-0"
           animate={{ scale: speaking ? 1.02 : 1 }}
@@ -149,7 +225,7 @@ export function VideoRoom({ meetingId, partner, food }: { meetingId: string; par
             {partner.name}
             {speaking && <span className="size-2 rounded-full bg-green-400 shadow-[0_0_10px_#4ade80]" aria-label="speaking" />}
           </p>
-          <p className="text-xs text-white/70">{partner.area} · mock participant (real WebRTC in Phase 5)</p>
+          <p className="text-xs text-white/70">{remoteLabel}</p>
         </div>
 
         {/* local preview */}
@@ -233,7 +309,7 @@ export function VideoRoom({ meetingId, partner, food }: { meetingId: string; par
           </ControlButton>
           <button
             type="button"
-            onClick={endCall}
+            onClick={() => void endCall()}
             aria-label="End call"
             className="grid h-12 w-16 place-items-center rounded-full bg-red-500 text-white transition-transform hover:scale-105 active:scale-95 [&_svg]:size-5"
           >

@@ -58,6 +58,8 @@ export interface SessionState {
   welcomed: boolean;
   plan: PlanId | null;
   planSince: string | null;
+  /** Null in the demo, where plans do not expire. */
+  planExpiresAt: string | null;
   avatar: AvatarConfig;
   ownedItems: string[];
   streakEvents: StreakEvent[];
@@ -97,6 +99,7 @@ export function blankSession(): SessionState {
     welcomed: false,
     plan: null,
     planSince: null,
+    planExpiresAt: null,
     avatar: defaultAvatar,
     ownedItems: [],
     streakEvents: [],
