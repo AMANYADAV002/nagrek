@@ -156,7 +156,7 @@ export interface AdminReward {
   sponsorId: string;
   sponsorName: string;
   title: string;
-  minStreak: number;
+  minVisits: number;
   minPlan: string;
   expiresAt: string;
   available: number;
@@ -167,7 +167,7 @@ export async function listRewardsAdmin(): Promise<{ rewards: AdminReward[]; spon
   const admin = (await requireAdmin())?.admin;
   if (!admin) return null;
   const [{ data: rewards }, { data: sponsors }, { data: codes }] = await Promise.all([
-    admin.from("rewards").select("*").order("min_streak"),
+    admin.from("rewards").select("*").order("min_visits"),
     admin.from("sponsors").select("id, name").order("name"),
     admin.from("reward_codes").select("reward_id, claimed_at"),
   ]);
@@ -178,7 +178,7 @@ export async function listRewardsAdmin(): Promise<{ rewards: AdminReward[]; spon
       sponsorId: r.sponsor_id,
       sponsorName: sponsors?.find((s) => s.id === r.sponsor_id)?.name ?? r.sponsor_id,
       title: r.title,
-      minStreak: r.min_streak,
+      minVisits: r.min_visits,
       minPlan: r.min_plan,
       expiresAt: r.expires_at,
       available: (codes ?? []).filter((c) => c.reward_id === r.id && !c.claimed_at).length,
@@ -196,7 +196,7 @@ const rewardSchema = z.object({
   sponsorId: z.string().min(1),
   title: z.string().trim().min(3, "Title is too short").max(60),
   description: z.string().trim().max(200).optional(),
-  minStreak: z.coerce.number().int().min(1).max(31),
+  minVisits: z.coerce.number().int().min(1).max(100),
   minPlan: z.enum(["plus", "premium", "ultra"]),
   expiresAt: z.iso.date("Pick an expiry date"),
   codes: codesSchema,
@@ -216,7 +216,9 @@ export async function createReward(raw: unknown): Promise<{ ok: true } | Fail> {
     sponsor_id: r.sponsorId,
     title: r.title,
     description: r.description ?? "",
-    min_streak: r.minStreak,
+    // min_streak is legacy (rewards unlock on visits now) but still non-null with a > 0 check.
+    min_streak: r.minVisits,
+    min_visits: r.minVisits,
     min_plan: r.minPlan,
     expires_at: r.expiresAt,
     stock: codes.length,

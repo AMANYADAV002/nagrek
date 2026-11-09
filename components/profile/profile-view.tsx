@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { StoryRing } from "@/components/avatar/story-ring";
+import { CallButtons } from "@/components/calls/call-buttons";
 import { GlassCard } from "@/components/glass/glass-card";
 import { GradientButton, GradientLink } from "@/components/glass/gradient-button";
 import { ReportDialog } from "@/components/safety/report-dialog";
@@ -238,6 +239,7 @@ export function ProfileView({ user }: { user?: MockUser }) {
               <Users />
               {connection === "accepted" ? "Connected" : connection === "pending-out" ? "Request sent" : connection === "pending-in" ? "Wants to connect" : "Connect"}
             </GradientButton>
+            {connection === "accepted" && <CallButtons personId={p.id} name={p.name} />}
             <GradientButton
               size="sm"
               variant="ghost"
@@ -368,10 +370,10 @@ export function ProfileView({ user }: { user?: MockUser }) {
           <GlassCard className="h-fit space-y-3 p-6">
             <h2 className="text-lg font-medium">Plan a meal together</h2>
             <p className="text-sm text-soft">
-              {connection === "accepted" ? "You are connected — propose something from your wish list." : "Connect first to plan a future meetup."}
+              {connection === "accepted" ? "You are connected. Plan a visit, then scan each other's code when you meet to grow your visit streak." : "Connect first to plan a future meetup."}
             </p>
-            <GradientLink href="/wishlist" size="sm" variant={connection === "accepted" ? "brand" : "glass"}>
-              Open wish list
+            <GradientLink href={connection === "accepted" ? `/visits?with=${p.id}` : "/wishlist"} size="sm" variant={connection === "accepted" ? "brand" : "glass"}>
+              {connection === "accepted" ? "Plan a visit" : "Open wish list"}
             </GradientLink>
           </GlassCard>
         )}

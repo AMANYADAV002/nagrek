@@ -25,6 +25,8 @@ const RULES: { prefix: string; need: Requirement }[] = [
   { prefix: "/match", need: "plan" },
   { prefix: "/room", need: "plan" },
   { prefix: "/feedback", need: "plan" },
+  { prefix: "/call", need: "plan" },
+  { prefix: "/visits", need: "plan" },
 ];
 
 export async function proxy(request: NextRequest) {
@@ -82,6 +84,8 @@ export const config = {
     "/match/:path*",
     "/room/:path*",
     "/feedback/:path*",
+    "/call/:path*",
+    "/visits/:path*",
     "/admin/:path*",
   ],
 };

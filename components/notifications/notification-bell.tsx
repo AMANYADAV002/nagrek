@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { Bell, BellRing, Camera, ShieldAlert, UserPlus, Utensils } from "lucide-react";
+import { Bell, BellRing, Camera, Gift, MapPinCheck, PhoneMissed, ShieldAlert, UserPlus, Utensils } from "lucide-react";
 import { toast } from "sonner";
+import { CallButtons } from "@/components/calls/call-buttons";
 import { useNotifications, type AppNotification } from "@/components/notifications/notifications-provider";
 import { GradientButton } from "@/components/glass/gradient-button";
 import { acceptJoin } from "@/lib/actions/matching";
@@ -115,6 +116,31 @@ function Item({ note, onDone }: { note: AppNotification; onDone: () => void }) {
     actions = (
       <Link href="/legal/guidelines" onClick={() => { markRead([note.id]); onDone(); }} className="mt-1 inline-block text-xs text-peach underline">
         Read the guidelines
+      </Link>
+    );
+  } else if (note.kind === "call_missed") {
+    icon = <PhoneMissed className="size-4" aria-hidden />;
+    body = `Missed ${note.payload.kind ?? ""} call from ${note.payload.name ?? "a connection"}`;
+    actions = note.payload.from && (
+      <CallButtons personId={note.payload.from} name={note.payload.name ?? ""} className="mt-2" />
+    );
+  } else if (note.kind.startsWith("visit_") || note.kind === "reward_unlocked") {
+    icon = note.kind === "reward_unlocked" ? <Gift className="size-4" aria-hidden /> : <MapPinCheck className="size-4" aria-hidden />;
+    const who = note.payload.name ?? "Your connection";
+    const place = note.payload.place ?? "a visit";
+    const text: Record<string, string> = {
+      visit_proposed: `${who} wants to meet at ${place}${note.payload.at ? ` on ${new Date(note.payload.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}` : ""}.`,
+      visit_accepted: `${who} confirmed your visit at ${place}.`,
+      visit_declined: `${who} can't make it to ${place}.`,
+      visit_cancelled: `${who} cancelled the visit at ${place}.`,
+      visit_verified: note.payload.counted === "false" ? `Visit with ${who} verified.` : `Visit with ${who} verified! Your visit streak is ${note.payload.streak ?? "up"}.`,
+      reward_unlocked: "You unlocked a sponsor reward. Your code is on the Streak page.",
+    };
+    body = text[note.kind] ?? "Visit update";
+    const href = note.kind === "reward_unlocked" ? "/streak" : "/visits";
+    actions = (
+      <Link href={href} onClick={() => { markRead([note.id]); onDone(); }} className="mt-1 inline-block text-xs text-peach underline">
+        {note.kind === "reward_unlocked" ? "See rewards" : note.kind === "visit_proposed" ? "Reply" : "Open visits"}
       </Link>
     );
   } else if (note.kind === "connection_request" || note.kind === "connection_accepted") {

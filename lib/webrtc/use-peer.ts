@@ -1,31 +1,43 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getIceServers, markMeetingStarted } from "@/lib/actions/meeting";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { PeerState, SignalMessage } from "@/lib/webrtc/types";
+import type { IceConfig, PeerState, SignalMessage } from "@/lib/webrtc/types";
 
 interface Options {
-  matchId: string;
+  /** Private Realtime topic, `room:<matchId>` or `call:<callId>`. RLS limits it to the two participants. */
+  topic: string;
   me: string;
   partnerId: string;
-  /** "a" (who started the match) makes offers; "b" answers. Avoids offer collisions. */
+  /** "a" makes offers; "b" answers. Avoids offer collisions. */
   role: "a" | "b";
-  /** Null when the camera is blocked: the call still connects, receive-only. */
+  /** Null when the camera/mic is blocked: the call still connects, receive-only. */
   localStream: MediaStream | null;
-  /** Start once the camera attempt has finished. */
+  /** Start once the media attempt has finished. */
   enabled: boolean;
+  /** False for voice calls: no video is sent or requested. */
+  video?: boolean;
+  /** STUN/TURN for this call, fetched from the server. */
+  loadIce: () => Promise<IceConfig>;
+  /** First time the two browsers connect. */
+  onConnected?: () => void;
 }
 
 /**
- * One-to-one WebRTC call. Signalling runs on the private Realtime channel `room:<matchId>`,
- * which only the two participants of a live match can use (RLS on realtime.messages).
- * Media goes browser-to-browser (or via TURN). Nothing is recorded.
+ * One-to-one WebRTC call. Signalling runs on a private Realtime channel that only the two
+ * participants can use (RLS on realtime.messages). Media goes browser-to-browser, or through
+ * the TURN relay. Nothing is recorded.
  */
-export function usePeer({ matchId, me, partnerId, role, localStream, enabled }: Options) {
+export function usePeer({ topic, me, partnerId, role, localStream, enabled, video = true, loadIce, onConnected }: Options) {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [state, setState] = useState<PeerState>("waiting");
   const leaveRef = useRef<() => void>(() => {});
+  const loadIceRef = useRef(loadIce);
+  const onConnectedRef = useRef(onConnected);
+  useEffect(() => {
+    loadIceRef.current = loadIce;
+    onConnectedRef.current = onConnected;
+  });
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -36,7 +48,7 @@ export function usePeer({ matchId, me, partnerId, role, localStream, enabled }: 
     let pc: RTCPeerConnection | null = null;
     let stats: ReturnType<typeof setInterval> | null = null;
 
-    const channel = supabase.channel(`room:${matchId}`, { config: { private: true, broadcast: { self: false } } });
+    const channel = supabase.channel(topic, { config: { private: true, broadcast: { self: false } } });
     const send = (message: SignalMessage) => void channel.send({ type: "broadcast", event: "signal", payload: message });
 
     const flush = async () => {
@@ -88,14 +100,16 @@ export function usePeer({ matchId, me, partnerId, role, localStream, enabled }: 
     };
 
     (async () => {
-      const iceServers = await getIceServers(matchId);
+      const ice = await loadIceRef.current();
       if (closed) return;
-      pc = new RTCPeerConnection({ iceServers });
+      pc = new RTCPeerConnection({ iceServers: ice.iceServers, iceTransportPolicy: ice.relayOnly ? "relay" : "all" });
 
       if (localStream) localStream.getTracks().forEach((t) => pc!.addTrack(t, localStream));
-      else if (role === "a") {
-        pc.addTransceiver("audio", { direction: "recvonly" });
-        pc.addTransceiver("video", { direction: "recvonly" });
+      if (role === "a") {
+        // Ask for whatever we are not sending ourselves, so a blocked mic/camera can still receive.
+        const sending = new Set(localStream?.getTracks().map((t) => t.kind) ?? []);
+        if (!sending.has("audio")) pc.addTransceiver("audio", { direction: "recvonly" });
+        if (video && !sending.has("video")) pc.addTransceiver("video", { direction: "recvonly" });
       }
 
       pc.ontrack = (e) => setRemoteStream(e.streams[0] ?? new MediaStream([e.track]));
@@ -106,7 +120,7 @@ export function usePeer({ matchId, me, partnerId, role, localStream, enabled }: 
           setState("connected");
           if (!started) {
             started = true;
-            void markMeetingStarted(matchId);
+            onConnectedRef.current?.();
           }
         } else if (s === "disconnected") setState("reconnecting");
         else if (s === "failed") {
@@ -155,7 +169,7 @@ export function usePeer({ matchId, me, partnerId, role, localStream, enabled }: 
       pc?.close();
       void supabase.removeChannel(channel);
     };
-  }, [enabled, matchId, me, partnerId, role, localStream]);
+  }, [enabled, topic, me, partnerId, role, localStream, video]);
 
   return { remoteStream, state, leave: () => leaveRef.current() };
 }

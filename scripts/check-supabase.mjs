@@ -1,5 +1,6 @@
 // Live checks against the configured Supabase project. Creates throwaway users and deletes them.
 // Run: npm run check:supabase
+import { createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -258,9 +259,13 @@ section("social", async () => {
   step("reward codes hidden from members", denied(codesErr) || codesSeen?.length === 0, codesErr?.message ?? "0 rows");
 
   const { error: shortErr } = await admin.rpc("claim_reward", { p_user: a.id, p_reward: "r1" });
-  step("claim refused without the streak", raised(shortErr, "streak"), shortErr?.message);
+  step("claim refused without verified visits", raised(shortErr, "visits"), shortErr?.message);
 
-  await admin.from("streaks").upsert({ user_id: a.id, current_count: 5, month: istMonth() });
+  await admin.from("streaks").upsert({ user_id: a.id, current_count: 30, month: istMonth() });
+  const { error: dayStreakErr } = await admin.rpc("claim_reward", { p_user: a.id, p_reward: "r1" });
+  step("call-day streak alone doesn't unlock rewards", raised(dayStreakErr, "visits"), dayStreakErr?.message);
+
+  await admin.from("visit_streaks").upsert({ user_id: a.id, current_count: 5, best_count: 5, total_verified: 5, last_counted_at: new Date().toISOString() });
   const { data: before } = await admin.from("rewards").select("stock").eq("id", "r1").single();
   const { data: code, error: claimErr } = await admin.rpc("claim_reward", { p_user: a.id, p_reward: "r1" });
   const { data: after } = await admin.from("rewards").select("stock").eq("id", "r1").single();
@@ -270,13 +275,116 @@ section("social", async () => {
   step("second claim refused", raised(againErr, "already_claimed"), againErr?.message);
 
   const { error: premiumErr } = await admin.rpc("claim_reward", { p_user: a.id, p_reward: "r3" });
-  step("plan-gated reward refused on Plus", raised(premiumErr, "plan") || raised(premiumErr, "streak"), premiumErr?.message);
+  step("plan-gated reward refused on Plus", raised(premiumErr, "plan") || raised(premiumErr, "visits"), premiumErr?.message);
 
   const { error: consentErr } = await a.client.from("story_consents").insert({ match_id: crypto.randomUUID(), requester_id: a.id, partner_id: b.id });
   step("client cannot fake story consent", denied(consentErr), consentErr?.message);
 
   const { error: boardErr } = await a.client.from("profiles").update({ show_on_leaderboard: true }).eq("id", a.id);
   step("leaderboard opt-in", !boardErr, boardErr?.message);
+});
+
+// --- Calls, visits and the verified visit streak --------------------------------
+const sha = (s) => createHash("sha256").update(s).digest("hex");
+/** A GPS fix `metres` north of a point in Indiranagar, taken just now. */
+const fixNear = (metres = 0, acc = 15) => ({ p_lat: 12.9716 + metres / 111_320, p_lng: 77.6412, p_acc: acc, p_fixed_at: new Date().toISOString() });
+
+async function plannedVisit(a, b, status = "accepted") {
+  const { data, error } = await admin
+    .from("visits")
+    .insert({ proposer_id: a.id, invitee_id: b.id, place_name: "Check Cafe", scheduled_at: new Date().toISOString(), status })
+    .select("id")
+    .single();
+  if (error) throw new Error(`visits insert: ${error.message}`);
+  return data.id;
+}
+
+async function showCode(visitId, user, fix = fixNear()) {
+  const token = `tok_${crypto.randomUUID()}`;
+  const { error } = await admin.rpc("issue_visit_token", { p_visit: visitId, p_user: user.id, p_token_hash: sha(token), ...fix });
+  return { token, error };
+}
+
+const scan = (visitId, user, token, fix = fixNear(20)) =>
+  admin.rpc("record_visit_scan", { p_visit: visitId, p_scanner: user.id, p_token_hash: sha(token), ...fix });
+
+section("calls & visits", async () => {
+  const a = await makeUser("ca", { plan: "plus" });
+  const b = await makeUser("cb", { plan: "plus" });
+  const c = await makeUser("cc", { plan: "plus" });
+
+  const { error: callInsertErr } = await a.client.from("calls").insert({ caller_id: a.id, callee_id: b.id, kind: "voice" });
+  step("client cannot start calls directly", denied(callInsertErr), callInsertErr?.message);
+
+  const { data: call } = await admin.from("calls").insert({ caller_id: a.id, callee_id: b.id, kind: "video", status: "accepted" }).select("id").single();
+  const { data: seenByB } = await b.client.from("calls").select("id").eq("id", call.id);
+  const { data: seenByC } = await c.client.from("calls").select("id").eq("id", call.id);
+  step("call visible to both participants only", seenByB?.length === 1 && seenByC?.length === 0);
+  const { data: phoneCols } = await b.client.from("calls").select("*").eq("id", call.id).single();
+  step("call rows carry no phone numbers", phoneCols && !Object.keys(phoneCols).some((k) => /phone|msisdn|number/i.test(k)), Object.keys(phoneCols ?? {}).join(","));
+  const inCall = await joinPrivate(a.client, `call:${call.id}`);
+  step("participant can join the call signalling channel", inCall === "SUBSCRIBED", inCall);
+  const outsiderCall = await joinPrivate(c.client, `call:${call.id}`);
+  step("outsider cannot join the call signalling channel", outsiderCall !== "SUBSCRIBED", outsiderCall);
+  await admin.from("calls").update({ status: "ended" }).eq("id", call.id);
+  const afterEnd = await joinPrivate(a.client, `call:${call.id}`);
+  step("ended call's channel is closed", afterEnd !== "SUBSCRIBED", afterEnd);
+
+  const { error: visitInsertErr } = await a.client.from("visits").insert({ proposer_id: a.id, invitee_id: b.id, place_name: "Hack", scheduled_at: new Date().toISOString(), status: "verified" });
+  step("client cannot create or self-verify visits", denied(visitInsertErr), visitInsertErr?.message);
+  const { error: tokensReadErr, data: tokensSeen } = await a.client.from("visit_tokens").select("*");
+  step("QR tokens and GPS fixes are server-only", denied(tokensReadErr) || tokensSeen?.length === 0, tokensReadErr?.message ?? "0 rows");
+  const { error: rpcScanErr } = await a.client.rpc("record_visit_scan", { p_visit: crypto.randomUUID(), p_scanner: a.id, p_token_hash: "x", ...fixNear() });
+  step("client cannot call record_visit_scan", denied(rpcScanErr), rpcScanErr?.message);
+  const { error: streakWriteErr } = await a.client.from("visit_streaks").insert({ user_id: a.id, current_count: 99 });
+  step("client cannot write its visit streak", denied(streakWriteErr), streakWriteErr?.message);
+
+  // Not yet accepted: no codes.
+  const pending = await plannedVisit(a, b, "proposed");
+  const { error: pendingErr } = await showCode(pending, a);
+  step("no code before both confirm the visit", raised(pendingErr, "not_accepted"), pendingErr?.message);
+
+  const visit = await plannedVisit(a, b);
+  const { error: weakErr } = await showCode(visit, a, fixNear(0, 500));
+  step("imprecise GPS refused", raised(weakErr, "weak_gps"), weakErr?.message);
+  const { error: staleErr } = await showCode(visit, a, { ...fixNear(), p_fixed_at: new Date(Date.now() - 10 * 60_000).toISOString() });
+  step("stale GPS refused", raised(staleErr, "stale_gps"), staleErr?.message);
+  const { error: outsiderShowErr } = await showCode(visit, c);
+  step("outsider cannot get a code for the visit", raised(outsiderShowErr, "visit_not_found"), outsiderShowErr?.message);
+
+  const aCode = await showCode(visit, a);
+  const { error: ownErr } = await scan(visit, a, aCode.token);
+  step("cannot scan your own code", raised(ownErr, "own_code"), ownErr?.message);
+  const { error: farErr } = await scan(visit, b, aCode.token, fixNear(1000));
+  step("scan 1 km away refused", raised(farErr, "too_far"), farErr?.message);
+  const { data: firstScan, error: firstErr } = await scan(visit, b, aCode.token);
+  step("first scan waits for the other person", !firstErr && firstScan?.state === "waiting_for_partner", firstErr?.message ?? JSON.stringify(firstScan));
+  const { error: replayErr } = await scan(visit, b, aCode.token);
+  step("a code works only once", raised(replayErr, "bad_token"), replayErr?.message);
+
+  const bCode = await showCode(visit, b, fixNear(20));
+  const { data: done, error: doneErr } = await scan(visit, a, bCode.token, fixNear(5));
+  const results = done?.results ?? [];
+  step("mutual scan verifies the visit", !doneErr && done?.state === "verified" && results.length === 2, doneErr?.message ?? JSON.stringify(done));
+  step("both streaks go to 1", results.every((r) => r.counted && r.streak === 1), JSON.stringify(results.map((r) => r.streak)));
+  step("1-visit reward unlocked for both", results.every((r) => r.rewards.includes("r1")), JSON.stringify(results.map((r) => r.rewards)));
+  const { data: aStreak } = await a.client.from("visit_streaks").select("current_count").eq("user_id", a.id).maybeSingle();
+  step("member can read their own visit streak", aStreak?.current_count === 1, JSON.stringify(aStreak));
+  const { data: leftover } = await admin.from("visit_tokens").select("id").eq("visit_id", visit);
+  step("GPS fixes deleted after verification", leftover?.length === 0, `${leftover?.length} rows`);
+
+  // Same pair again this week: verified, but no streak farming.
+  const again = await plannedVisit(b, a);
+  const a2 = await showCode(again, a);
+  await scan(again, b, a2.token);
+  const b2 = await showCode(again, b);
+  const { data: again2 } = await scan(again, a, b2.token);
+  step("same pair within 7 days doesn't count again", again2?.state === "verified" && again2.results.every((r) => !r.counted && r.reason === "same_partner_this_week"), JSON.stringify(again2?.results?.map((r) => r.reason)));
+
+  // Teleporting: a fix in Mumbai seconds after one in Bengaluru.
+  const trip = await plannedVisit(a, c);
+  const { error: teleportErr } = await showCode(trip, a, { p_lat: 19.076, p_lng: 72.8777, p_acc: 10, p_fixed_at: new Date().toISOString() });
+  step("impossible travel refused", raised(teleportErr, "impossible_travel"), teleportErr?.message);
 });
 
 // --- Phase 7: admin -----------------------------------------------------------

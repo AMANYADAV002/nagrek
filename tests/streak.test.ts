@@ -63,16 +63,16 @@ describe("milestoneProgress", () => {
 });
 
 describe("rewardEligibility", () => {
-  const reward = { id: "r1", minStreak: 7, minPlan: "premium" as const, expiresAt: "2026-12-31", stock: 10 };
-  const ok = { streak: 7, plan: "premium" as const, claimedIds: [], now: NOW };
+  const reward = { id: "r1", minVisits: 3, minPlan: "premium" as const, expiresAt: "2026-12-31", stock: 10 };
+  const ok = { visits: 3, plan: "premium" as const, claimedIds: [], now: NOW };
 
   it("is eligible when every rule passes", () => {
     expect(rewardEligibility(reward, ok)).toEqual({ eligible: true });
-    expect(rewardEligibility(reward, { ...ok, plan: "ultra", streak: 20 })).toEqual({ eligible: true });
+    expect(rewardEligibility(reward, { ...ok, plan: "ultra", visits: 9 })).toEqual({ eligible: true });
   });
 
-  it("requires the streak", () => {
-    expect(rewardEligibility(reward, { ...ok, streak: 6 })).toEqual({ eligible: false, reason: "streak" });
+  it("requires enough verified visits", () => {
+    expect(rewardEligibility(reward, { ...ok, visits: 2 })).toEqual({ eligible: false, reason: "visits" });
   });
 
   it("requires a high enough plan", () => {

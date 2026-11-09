@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Ban, Check, CalendarPlus, UserPlus, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { LayeredAvatar } from "@/components/avatar/layered-avatar";
+import { CallButtons } from "@/components/calls/call-buttons";
 import { GlassCard } from "@/components/glass/glass-card";
 import { GradientButton, GradientLink } from "@/components/glass/gradient-button";
 import { PageHeader } from "@/components/glass/section-heading";
@@ -101,7 +102,10 @@ export function ConnectionsView() {
                         </>
                       )}
                       {tab === "friends" && (
-                        <GradientLink href="/wishlist" size="sm"><CalendarPlus /> Plan</GradientLink>
+                        <>
+                          <CallButtons personId={u.id} name={u.name} />
+                          <GradientLink href={`/visits?with=${u.id}`} size="sm"><CalendarPlus /> Plan</GradientLink>
+                        </>
                       )}
                       {tab === "sent" && (
                         <GradientButton size="sm" variant="ghost" onClick={() => { setConn(u.id, null); syncBackend(() => cancelConnection(u.id)); }}>Cancel</GradientButton>

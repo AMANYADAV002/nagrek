@@ -41,7 +41,15 @@ The app runs the full demo with no keys. To persist accounts:
 
 ## Video calls (Phase 5)
 
-Calls are peer-to-peer WebRTC. Supabase Realtime carries the connection setup, and nothing is recorded. STUN works out of the box. For people on strict networks (some mobile carriers, offices), add a TURN server in `TURN_URLS`, `TURN_USERNAME` and `TURN_CREDENTIAL`. You can self-host coturn or use a provider such as Metered or Twilio. To test, open the app in two browsers (or one normal window and one private window) with two accounts, post the same craving, and accept the match on both.
+Calls are WebRTC. Supabase Realtime carries the connection setup, and nothing is recorded. STUN works out of the box. For people on strict networks (some mobile carriers, offices), run the coturn relay in `deploy/coturn/turnserver.conf` on a small VPS and set `TURN_URLS` and `TURN_SECRET`; the app hands each person 2-hour credentials. Set `TURN_FORCE_RELAY=true` to send all media through your relay so nobody learns anyone's IP address. To test a match call, open the app in two browsers (or one normal window and one private window) with two accounts, post the same craving, and accept the match on both.
+
+### Calls, visits and the visit streak
+
+- **Calls:** connections can voice or video call each other from People or a profile. People are addressed by their app user id only; no phone number is ever collected. Ringing, accept, decline and missed calls are rows in `calls`; signalling runs on the private channel `call:<id>`.
+- **Visits:** plan an in-person visit from a call, a profile, or `/visits`. The other person accepts or declines.
+- **Verification:** from 2 hours before to 6 hours after the planned time, each person opens "Verify meetup", shows a rotating QR code (new every 25 s, valid once for 45 s), and scans the other's. The server checks both phones' GPS fixes (precise to 100 m, under 2 minutes old, within 150 m of each other, no impossible travel). When both have scanned within 10 minutes, the visit is verified and both visit streaks go up in the same transaction.
+- **Streak and rewards:** one counted visit per pair per 7 days and at most two per day; the streak resets after 30 days without one. Sponsor rewards unlock on the visit streak and are issued to both people automatically.
+- Testing verification needs two phones (camera and GPS) on HTTPS, for example the deployed site or a tunnel to `localhost`.
 
 ## Razorpay (Phase 3)
 
@@ -115,7 +123,7 @@ Search for `TODO(phase-` to see every stubbed integration point.
    - `NEXT_PUBLIC_SITE_URL` (your domain)
    - the three Supabase keys
    - `NEXT_PUBLIC_FREE_PREVIEW`
-   - optionally TURN and Razorpay
+   - optionally TURN (`TURN_URLS`, `TURN_SECRET`, `TURN_FORCE_RELAY`) and Razorpay
 
    `NEXT_PUBLIC_*` values are baked in at build time, so rebuild after changing them.
 5. In Supabase **Authentication → URL Configuration**, add `https://<your-domain>/auth/callback`.

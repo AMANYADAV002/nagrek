@@ -53,17 +53,18 @@ export function milestoneProgress(streak: number, milestones: readonly number[] 
 
 const PLAN_RANK: Record<PlanId, number> = { plus: 1, premium: 2, ultra: 3 };
 
-export type IneligibleReason = "claimed" | "streak" | "plan" | "expired" | "out_of_stock";
+export type IneligibleReason = "claimed" | "visits" | "plan" | "expired" | "out_of_stock";
 
+/** Mirrors claim_reward() in the database. `visits` is the verified-visit streak. */
 export function rewardEligibility(
-  reward: Pick<Reward, "id" | "minStreak" | "minPlan" | "expiresAt" | "stock">,
-  ctx: { streak: number; plan: PlanId | null; claimedIds: string[]; now?: Date },
+  reward: Pick<Reward, "id" | "minVisits" | "minPlan" | "expiresAt" | "stock">,
+  ctx: { visits: number; plan: PlanId | null; claimedIds: string[]; now?: Date },
 ): { eligible: boolean; reason?: IneligibleReason } {
   const now = ctx.now ?? new Date();
   if (ctx.claimedIds.includes(reward.id)) return { eligible: false, reason: "claimed" };
   if (new Date(reward.expiresAt) < now) return { eligible: false, reason: "expired" };
   if (reward.stock <= 0) return { eligible: false, reason: "out_of_stock" };
   if (!ctx.plan || PLAN_RANK[ctx.plan] < PLAN_RANK[reward.minPlan]) return { eligible: false, reason: "plan" };
-  if (ctx.streak < reward.minStreak) return { eligible: false, reason: "streak" };
+  if (ctx.visits < reward.minVisits) return { eligible: false, reason: "visits" };
   return { eligible: true };
 }

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
 import {
-  Compass, Flame, Heart, Home, ListChecks, LogOut, Sparkles, User, Users,
+  Compass, Flame, Heart, Home, ListChecks, LogOut, MapPinCheck, Sparkles, User, Users,
 } from "lucide-react";
 import { Wordmark } from "@/components/brand/wordmark";
 import { LayeredAvatar } from "@/components/avatar/layered-avatar";
@@ -24,6 +24,7 @@ const items = [
 ];
 
 const secondary = [
+  { href: "/visits", label: "Visits", icon: MapPinCheck },
   { href: "/explore", label: "Explore places", icon: Compass },
   { href: "/wishlist", label: "Wish list", icon: ListChecks },
   { href: "/avatar", label: "Avatar studio", icon: Heart },

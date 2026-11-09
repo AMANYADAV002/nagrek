@@ -18,7 +18,7 @@ import type { PlanId } from "@/lib/types";
 const demoSchema = z.object({
   sponsorId: z.string().min(1),
   title: z.string().trim().min(3, "Title is too short").max(60),
-  minStreak: z.coerce.number().int().min(1).max(31),
+  minVisits: z.coerce.number().int().min(1).max(100),
   minPlan: z.enum(["plus", "premium", "ultra"]),
   expiresAt: z.string().min(1, "Pick an expiry date"),
 });
@@ -29,7 +29,7 @@ const fromSeed = (): AdminReward[] =>
     sponsorId: r.sponsorId,
     sponsorName: sponsorFor(r.sponsorId)?.name ?? r.sponsorId,
     title: r.title,
-    minStreak: r.minStreak,
+    minVisits: r.minVisits,
     minPlan: r.minPlan,
     expiresAt: r.expiresAt,
     available: r.stock,
@@ -44,7 +44,7 @@ export function RewardsAdmin() {
   const live = backendEnabled();
   const [list, setList] = useState<AdminReward[]>(live ? [] : fromSeed());
   const [sponsors, setSponsors] = useState<{ id: string; name: string }[]>(seedSponsors);
-  const [form, setForm] = useState({ sponsorId: seedSponsors[0]!.id, title: "", minStreak: "7", minPlan: "plus", expiresAt: "", codes: "" });
+  const [form, setForm] = useState({ sponsorId: seedSponsors[0]!.id, title: "", minVisits: "3", minPlan: "plus", expiresAt: "", codes: "" });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [codesFor, setCodesFor] = useState<string | null>(null);
@@ -105,7 +105,7 @@ export function RewardsAdmin() {
             {sponsors.map((s) => <option key={s.id} value={s.id} className="bg-ink">{s.name}</option>)}
           </select>
           <Input aria-label="Reward title" placeholder="Reward title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className={`${field} lg:col-span-2`} />
-          <Input aria-label="Minimum streak (days)" type="number" min={1} max={31} value={form.minStreak} onChange={(e) => setForm({ ...form, minStreak: e.target.value })} className={field} />
+          <Input aria-label="Verified visits needed" title="Verified visits needed" type="number" min={1} max={100} value={form.minVisits} onChange={(e) => setForm({ ...form, minVisits: e.target.value })} className={field} />
           <select aria-label="Minimum plan" value={form.minPlan} onChange={(e) => setForm({ ...form, minPlan: e.target.value })} className={`${field} border border-input bg-transparent px-3 text-sm`}>
             {["plus", "premium", "ultra"].map((p) => <option key={p} value={p} className="bg-ink">{p}</option>)}
           </select>
@@ -130,7 +130,7 @@ export function RewardsAdmin() {
             <tr className="border-b border-white/10">
               <th className="px-4 py-3 font-medium">Reward</th>
               <th className="px-4 py-3 font-medium">Sponsor</th>
-              <th className="px-4 py-3 font-medium">Streak</th>
+              <th className="px-4 py-3 font-medium">Visits</th>
               <th className="px-4 py-3 font-medium">Plan</th>
               <th className="px-4 py-3 font-medium">Codes left</th>
               <th className="px-4 py-3 font-medium">Claimed</th>
@@ -154,7 +154,7 @@ export function RewardsAdmin() {
                   )}
                 </td>
                 <td className="px-4 py-3 text-soft">{r.sponsorName}</td>
-                <td className="px-4 py-3">{r.minStreak} days</td>
+                <td className="px-4 py-3">{r.minVisits} verified</td>
                 <td className="px-4 py-3">{getPlan(r.minPlan as PlanId)?.name ?? r.minPlan}</td>
                 <td className="px-4 py-3">{r.available}</td>
                 <td className="px-4 py-3">{r.claimed}</td>

@@ -15,7 +15,7 @@ import { cravingEmoji } from "@/lib/data/cravings";
 import { icebreakers } from "@/lib/data/icebreakers";
 import { track } from "@/lib/analytics";
 import { toneLabel } from "@/lib/format";
-import { endMeeting } from "@/lib/actions/meeting";
+import { endMeeting, getIceServers, markMeetingStarted } from "@/lib/actions/meeting";
 import { updateSession, useSession } from "@/lib/mock/session";
 import type { MockUser } from "@/lib/types";
 import { usePeer } from "@/lib/webrtc/use-peer";
@@ -100,12 +100,14 @@ export function VideoRoom({
   }, []);
 
   const peer = usePeer({
-    matchId: meetingId,
+    topic: `room:${meetingId}`,
     me: live?.me ?? "",
     partnerId: partner.id,
     role: live?.role ?? "a",
     localStream,
     enabled: !!live && cam !== "requesting",
+    loadIce: () => getIceServers(meetingId),
+    onConnected: () => void markMeetingStarted(meetingId),
   });
 
   useEffect(() => {

@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Coffee, Gift, Hotel, Lock, Snowflake, Ticket, Trophy, Utensils } from "lucide-react";
+import { Coffee, Gift, Hotel, Lock, MapPinCheck, Snowflake, Ticket, Trophy, Utensils } from "lucide-react";
 import { toast } from "sonner";
 import { GlassCard } from "@/components/glass/glass-card";
-import { GradientButton } from "@/components/glass/gradient-button";
+import { GradientButton, GradientLink } from "@/components/glass/gradient-button";
 import { PageHeader } from "@/components/glass/section-heading";
 import { Stagger, StaggerItem } from "@/components/motion/stagger";
 import { Flame } from "@/components/streak/flame";
@@ -23,9 +23,11 @@ import { calculateStreak, milestoneProgress, rewardEligibility } from "@/lib/str
 import { cn } from "@/lib/utils";
 
 const kindIcon = { cafe: Coffee, restaurant: Utensils, hotel: Hotel } as const;
+/** Demo mode has no real visits; enough to show one reward as claimable. */
+const DEMO_VISIT_STREAK = 2;
 const reasonText = {
   claimed: "Claimed",
-  streak: "Keep your streak going",
+  visits: "Verify more visits",
   plan: "Upgrade to unlock",
   expired: "Expired",
   out_of_stock: "Out of stock",
@@ -55,6 +57,7 @@ export function StreakView() {
   const sponsorOf = (id: string) => (live ? data?.sponsors.find((s) => s.id === id) : sponsorFor(id));
   const claims = live ? (data?.claimed ?? []) : session.claimedRewards.map((c) => ({ ...c, code: null as string | null }));
   const claimedIds = claims.map((c) => c.rewardId);
+  const visits = live ? (data?.visitStreak ?? 0) : DEMO_VISIT_STREAK;
   const month = new Date().toLocaleString("en-IN", { month: "long" });
 
   async function claim(rewardId: string) {
@@ -145,6 +148,18 @@ export function StreakView() {
         </div>
       </GlassCard>
 
+      <GlassCard className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center">
+        <span className="grid size-16 shrink-0 place-items-center rounded-2xl bg-brand font-heading text-3xl font-bold text-ink">{visits}</span>
+        <div className="flex-1">
+          <h2 className="flex items-center gap-2 text-lg font-medium"><MapPinCheck className="size-5 text-peach" aria-hidden /> Visit streak</h2>
+          <p className="text-sm text-soft">
+            Meet a connection in person and scan each other&apos;s code to verify the visit. Each verified visit adds one. Sponsor rewards unlock on visits, for both of you.
+            {" "}Your visit streak resets after 30 days without one.
+          </p>
+        </div>
+        <GradientLink href="/visits" size="sm">Plan a visit</GradientLink>
+      </GlassCard>
+
       <section aria-labelledby="rewards-heading" className="space-y-4">
         <h2 id="rewards-heading" className="flex items-center gap-2 text-2xl font-medium">
           <Gift className="size-6 text-peach" aria-hidden /> Sponsor rewards
@@ -154,7 +169,7 @@ export function StreakView() {
             const sponsor = sponsorOf(r.sponsorId);
             const code = claims.find((c) => c.rewardId === r.id)?.code;
             const Icon = sponsor ? kindIcon[sponsor.kind] : Ticket;
-            const elig = rewardEligibility(r, { streak, plan: session.plan, claimedIds });
+            const elig = rewardEligibility(r, { visits, plan: session.plan, claimedIds });
             return (
               <StaggerItem key={r.id}>
                 <GlassCard className={cn("flex h-full flex-col gap-4 p-5", elig.eligible && "ring-1 ring-peach/50")}>
@@ -170,7 +185,7 @@ export function StreakView() {
                   </div>
                   <div className="mt-auto flex flex-wrap items-center justify-between gap-2 text-xs">
                     <span className="text-soft">
-                      {r.minStreak}-day streak · {getPlan(r.minPlan)?.name}+ · {r.stock} left
+                      {r.minVisits} verified visit{r.minVisits === 1 ? "" : "s"} · {getPlan(r.minPlan)?.name}+ · {r.stock} left
                     </span>
                     {elig.eligible ? (
                       <GradientButton size="sm" disabled={claiming === r.id} onClick={() => void claim(r.id)}>

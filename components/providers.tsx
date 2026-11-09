@@ -1,6 +1,7 @@
 "use client";
 
 import { AccountSync } from "@/components/account-sync";
+import { IncomingCallAlert } from "@/components/calls/incoming-call";
 import { NotificationsProvider } from "@/components/notifications/notifications-provider";
 import { MotionConfig } from "framer-motion";
 import { Toaster } from "sonner";
@@ -10,6 +11,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <MotionConfig reducedMotion="user">
       <AccountSync />
       <NotificationsProvider>{children}</NotificationsProvider>
+      <IncomingCallAlert />
       <Toaster
         theme="dark"
         position="top-center"

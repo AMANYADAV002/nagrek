@@ -12,24 +12,28 @@ export interface RewardsData {
   sponsors: Sponsor[];
   /** Only the caller's own claims, with the codes they were issued. */
   claimed: { rewardId: string; claimedAt: string; code: string | null }[];
+  /** Verified in-person visits in a row (lapses after 30 days without one). */
+  visitStreak: number;
 }
 
 export async function loadRewards(): Promise<RewardsData | null> {
   const caller = await getCaller();
   if (!caller) return null;
   const { admin, supabase, userId } = caller;
-  const [{ data: rewards }, { data: sponsors }, { data: mine }] = await Promise.all([
-    supabase.from("rewards").select("*").order("min_streak"),
+  const [{ data: rewards }, { data: sponsors }, { data: mine }, { data: visits }] = await Promise.all([
+    supabase.from("rewards").select("*").order("min_visits"),
     supabase.from("sponsors").select("*"),
     admin.from("user_rewards").select("reward_id, claimed_at, reward_codes(code)").eq("user_id", userId),
+    admin.rpc("effective_visit_streak", { p_user: userId }),
   ]);
   return {
+    visitStreak: (visits as number | null) ?? 0,
     rewards: (rewards ?? []).map((r) => ({
       id: r.id,
       sponsorId: r.sponsor_id,
       title: r.title,
       description: r.description,
-      minStreak: r.min_streak,
+      minVisits: r.min_visits,
       minPlan: r.min_plan as PlanId,
       expiresAt: r.expires_at,
       stock: r.stock,
@@ -52,7 +56,7 @@ const CLAIM_ERRORS: Record<string, string> = {
   already_claimed: "You already claimed this reward.",
   not_allowed: "Your account can't claim rewards right now.",
   plan: "Your plan doesn't include this reward.",
-  streak: "Your streak isn't long enough yet.",
+  visits: "You need more verified visits for this reward.",
   out_of_stock: "This reward just ran out.",
 };
 
@@ -62,7 +66,6 @@ export async function claimReward(rewardId: string): Promise<{ ok: true; code: s
   const m = await getMember();
   if ("error" in m) return m;
   if (rateLimited(`claim:${m.userId}`, 5, 60_000)) return SLOW_DOWN;
-  await refreshStreak(m.admin, m.userId);
   const { data, error } = await m.admin.rpc("claim_reward", { p_user: m.userId, p_reward: rewardId });
   if (error) {
     const key = Object.keys(CLAIM_ERRORS).find((k) => error.message.includes(k));
