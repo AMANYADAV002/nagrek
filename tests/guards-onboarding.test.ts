@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { homeFor, redirectFor } from "@/lib/guards";
-import { ageFrom, legalStep, roundCoord } from "@/lib/validation/onboarding";
+import { ageFrom, latestAdultDob, legalStep, roundCoord } from "@/lib/validation/onboarding";
 
 describe("redirectFor", () => {
   const anon = { signedIn: false, onboarded: false, plan: null };
@@ -32,6 +32,23 @@ describe("18+ gate", () => {
     expect(ageFrom("2008-11-20", now)).toBe(18);
     expect(ageFrom("2008-11-21", now)).toBe(17);
     expect(ageFrom("not-a-date", now)).toBe(-1);
+  });
+
+  it("rejects impossible and future dates", () => {
+    expect(ageFrom("2008-02-31", now)).toBe(-1);
+    expect(ageFrom("2008-13-01", now)).toBe(-1);
+    expect(ageFrom("2026-11-21", now)).toBe(-1);
+    expect(ageFrom("2026-11-20", now)).toBe(0);
+  });
+
+  it("ages 29 Feb birthdays on 1 Mar in non-leap years", () => {
+    expect(ageFrom("2008-02-29", new Date(2026, 1, 28))).toBe(17);
+    expect(ageFrom("2008-02-29", new Date(2026, 2, 1))).toBe(18);
+  });
+
+  it("caps the picker at the latest adult birthday", () => {
+    expect(latestAdultDob(now)).toBe("2008-11-20");
+    expect(ageFrom(latestAdultDob(now), now)).toBe(18);
   });
 
   it("rejects under-18s and unchecked consent", () => {

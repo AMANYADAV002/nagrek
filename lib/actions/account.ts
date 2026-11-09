@@ -110,9 +110,10 @@ export async function saveOnboarding(raw: unknown): Promise<Result> {
   const pref = await supabase.from("user_preferences").upsert(preferencesRow(userId, parsed.data));
   if (pref.error) return { ok: false, error: pref.error.message };
 
+  // Consents are append-only (insert grant, no update), so an existing row for this terms version is kept as-is.
   const consent = await supabase.from("consents").upsert(
     { user_id: userId, adult: true, respectful: true, terms_version: TERMS_VERSION },
-    { onConflict: "user_id,terms_version" },
+    { onConflict: "user_id,terms_version", ignoreDuplicates: true },
   );
   if (consent.error) return { ok: false, error: consent.error.message };
 

@@ -12,6 +12,7 @@ import { GradientButton } from "@/components/glass/gradient-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { fetchMyAccount } from "@/lib/account-client";
+import { createLocalAccount } from "@/lib/actions/local-signup";
 import { homeFor } from "@/lib/guards";
 import { hydrateSession, snapshotOf, updateSession, useSession } from "@/lib/mock/session";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -119,7 +120,18 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
           options: { data: { name }, emailRedirectTo: `${location.origin}/auth/callback` },
         });
         setPending(false);
-        if (error) return toast.error(emailErrorMessage(error.message));
+        if (error) {
+          const blocked = error.code === "over_email_send_rate_limit" || error.status === 429 || /rate limit|error sending confirmation/i.test(error.message);
+          if (blocked) {
+            const made = await createLocalAccount({ name, email, password: parsed.data.password });
+            if (!made.ok) return toast.error(made.error);
+            const signed = await supabase.auth.signInWithPassword({ email, password: parsed.data.password });
+            if (signed.error) return toast.error(signed.error.message);
+            toast.success("Supabase could not send the confirmation email, so this account was opened without it.");
+            return enterWithAccount();
+          }
+          return toast.error(emailErrorMessage(error.message));
+        }
         // An already-registered email comes back as "success" with no identities and no email sent.
         if (created.user && created.user.identities?.length === 0) {
           return toast.error("An account with this email already exists. Sign in instead, or resend the confirmation email.", {

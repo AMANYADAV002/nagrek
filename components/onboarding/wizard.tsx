@@ -25,7 +25,7 @@ import { backendEnabled } from "@/lib/supabase/env";
 import type { Dietary, GroupSize, Tone } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
-  foodStep, interestsStep, legalStep, locationStep, roundCoord, scheduleStep, tasteStep, toneStep,
+  ageFrom, earliestDob, foodStep, interestsStep, latestAdultDob, legalStep, locationStep, MIN_AGE, roundCoord, scheduleStep, tasteStep, toneStep,
 } from "@/lib/validation/onboarding";
 
 interface Draft {
@@ -363,10 +363,13 @@ export function OnboardingWizard() {
                     id="dob"
                     type="date"
                     value={draft.dateOfBirth}
-                    max={new Date().toISOString().slice(0, 10)}
+                    min={earliestDob()}
+                    max={latestAdultDob()}
                     onChange={(e) => set({ dateOfBirth: e.target.value })}
+                    aria-describedby="dob-age"
                     className="h-11 max-w-xs rounded-xl [color-scheme:dark]"
                   />
+                  {draft.dateOfBirth && <AgeNote dob={draft.dateOfBirth} />}
                 </div>
                 <div className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
                   <label className="flex cursor-pointer items-start gap-3 text-sm">
@@ -408,6 +411,21 @@ export function OnboardingWizard() {
       {session?.user && <p className="mt-4 text-center text-xs text-soft">Signed in as {session.user.email}</p>}
     </main>
   );
+}
+
+function AgeNote({ dob }: { dob: string }) {
+  const age = ageFrom(dob);
+  if (age === -1) {
+    return <p id="dob-age" className="text-xs text-red-300">That is not a real date of birth.</p>;
+  }
+  if (age < MIN_AGE) {
+    return (
+      <p id="dob-age" role="alert" className="text-xs text-red-300">
+        You are {age}. Nagrek is only for people {MIN_AGE} and over, so you can&apos;t continue.
+      </p>
+    );
+  }
+  return <p id="dob-age" className="text-xs text-soft">Age {age}. Your date of birth stays private.</p>;
 }
 
 function ChipGroup({ label, options, value, onChange }: { label: string; options: string[]; value: string[]; onChange: (v: string[]) => void }) {
