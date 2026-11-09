@@ -27,6 +27,19 @@ const signInSchema = signUpSchema.pick({ email: true, password: true });
 
 type Errors = Partial<Record<"name" | "email" | "password", string>>;
 
+/** Supabase's built-in mailer refuses most addresses and allows ~2 emails an hour until custom SMTP is set. */
+function emailErrorMessage(message: string) {
+  const m = message.toLowerCase();
+  if (m.includes("rate limit") || m.includes("security purposes")) {
+    return "Too many emails were sent recently. Wait a few minutes and try again.";
+  }
+  if (m.includes("not authorized")) {
+    return "Our mail service can't send to this address yet. Use Continue with Google, or try again later.";
+  }
+  if (m.includes("email not confirmed")) return "Confirm your email first. Use \"Resend confirmation email\" below.";
+  return message;
+}
+
 function GoogleIcon() {
   return (
     <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
@@ -40,7 +53,24 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
   const session = useSession();
   const [errors, setErrors] = useState<Errors>({});
   const [pending, setPending] = useState(false);
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
   const isSignUp = mode === "sign-up";
+
+  async function resendConfirmation(email: string) {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    setResending(true);
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: { emailRedirectTo: `${location.origin}/auth/callback` },
+    });
+    setResending(false);
+    if (error) return toast.error(emailErrorMessage(error.message));
+    setSentTo(email);
+    toast.success("Confirmation email sent again. Check your inbox and spam folder.");
+  }
 
   function finish(name: string, email: string) {
     updateSession({
@@ -89,14 +119,26 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
           options: { data: { name }, emailRedirectTo: `${location.origin}/auth/callback` },
         });
         setPending(false);
-        if (error) return toast.error(error.message);
+        if (error) return toast.error(emailErrorMessage(error.message));
+        // An already-registered email comes back as "success" with no identities and no email sent.
+        if (created.user && created.user.identities?.length === 0) {
+          return toast.error("An account with this email already exists. Sign in instead, or resend the confirmation email.", {
+            action: { label: "Sign in", onClick: () => router.push("/sign-in") },
+          });
+        }
         track("signup", { method: "password" });
-        if (!created.session) return toast.success("Check your email to confirm your account, then sign in.");
+        if (!created.session) {
+          setSentTo(email);
+          return toast.success("Check your email to confirm your account.");
+        }
         return enterWithAccount();
       }
       const { error } = await supabase.auth.signInWithPassword({ email, password: parsed.data.password });
       setPending(false);
-      if (error) return toast.error(error.message);
+      if (error) {
+        if (error.message.toLowerCase().includes("email not confirmed")) setSentTo(email);
+        return toast.error(emailErrorMessage(error.message));
+      }
       return enterWithAccount();
     }
 
@@ -146,7 +188,7 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
                 email: parsed.data.email,
                 options: { emailRedirectTo: `${location.origin}/auth/callback` },
               });
-              if (error) return toast.error(error.message);
+              if (error) return toast.error(emailErrorMessage(error.message));
               toast.success("Magic link sent. Check your inbox.");
             }}
           >
@@ -182,6 +224,23 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
             <Sparkles /> {pending ? "One moment…" : isSignUp ? "Create account" : "Sign in"}
           </GradientButton>
         </form>
+
+        {sentTo && (
+          <div role="status" className="space-y-2 rounded-2xl border border-peach/25 bg-peach/5 p-4 text-center text-sm">
+            <p>
+              We sent a confirmation link to <strong className="break-all">{sentTo}</strong>.
+            </p>
+            <p className="text-xs text-soft">Open it on this device, then sign in. Not there? Check spam or promotions.</p>
+            <button
+              type="button"
+              disabled={resending}
+              onClick={() => void resendConfirmation(sentTo)}
+              className="text-xs font-medium text-peach hover:underline disabled:opacity-50"
+            >
+              {resending ? "Sending…" : "Resend confirmation email"}
+            </button>
+          </div>
+        )}
 
         <p className="text-center text-xs text-soft">
           {isSignUp ? "Already have an account? " : "New to Nagrek? "}
