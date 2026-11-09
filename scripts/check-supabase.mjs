@@ -86,6 +86,20 @@ section("accounts", async () => {
 
   const { error: planHackErr } = await me.client.from("profiles").update({ plan_id: "ultra" }).eq("id", me.id);
   step("client cannot set its own plan", denied(planHackErr), planHackErr?.message);
+
+  // The same nested reads the app does on sign-in (loadMyAccount).
+  const friend = await makeUser("friend");
+  const stranger = await makeUser("stranger");
+  const { data: wish } = await me.client.from("wishlist_items").insert({ user_id: me.id, kind: "food", title: "Dosa crawl" }).select("id").single();
+  const { error: shareErr } = await me.client.from("wishlist_shares").insert({ item_id: wish?.id, shared_with: friend.id });
+  const { error: wishReadErr } = await me.client.from("wishlist_items").select("id, wishlist_shares(shared_with)").eq("user_id", me.id);
+  const { error: planReadErr } = await me.client.from("plans_future").select("id, plan_invites(invitee_id)").eq("user_id", me.id);
+  step("wish list and plans load with shares", !shareErr && !wishReadErr && !planReadErr, shareErr?.message ?? wishReadErr?.message ?? planReadErr?.message);
+  const { data: friendSees } = await friend.client.from("wishlist_items").select("id").eq("id", wish?.id);
+  const { data: strangerSees } = await stranger.client.from("wishlist_items").select("id").eq("id", wish?.id);
+  step("shared wish visible only to the friend", friendSees?.length === 1 && strangerSees?.length === 0);
+  const { error: hijackErr } = await stranger.client.from("wishlist_shares").insert({ item_id: wish?.id, shared_with: stranger.id });
+  step("cannot share someone else's wish", denied(hijackErr), hijackErr?.message);
 });
 
 // --- Phase 3: payments --------------------------------------------------------
@@ -156,8 +170,8 @@ async function joinPrivate(client, topic) {
       void client.removeChannel(channel);
       resolve(status);
     }
-    channel.subscribe((status) => {
-      if (status === "SUBSCRIBED" || status === "CHANNEL_ERROR") finish(status);
+    channel.subscribe((status, err) => {
+      if (status === "SUBSCRIBED" || status === "CHANNEL_ERROR") finish(err ? `${status}: ${err.message}` : status);
     });
   });
 }

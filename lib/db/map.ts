@@ -107,6 +107,7 @@ export function accountFromRows(input: {
   preferences: PreferenceRow | null;
   consent: Consent | null;
   following: string[];
+  followers?: number;
   connections: ConnectionRow[];
   blocked: string[];
   muted: string[];
@@ -181,6 +182,7 @@ export function accountFromRows(input: {
     wishlist,
     futurePlans,
     following: input.following,
+    followers: input.followers ?? 0,
     connections,
     blocked: input.blocked,
     muted: input.muted,

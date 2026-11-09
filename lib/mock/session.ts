@@ -67,6 +67,8 @@ export interface SessionState {
   wishlist: WishItem[];
   futurePlans: FuturePlan[];
   following: string[];
+  /** Missing in demo sessions saved before this field existed. */
+  followers?: number;
   connections: Record<string, ConnectionStatus>;
   blocked: string[];
   muted: string[];
@@ -128,6 +130,7 @@ export function initialSession(): SessionState {
       { id: "w2", kind: "food", title: "Hyderabadi biryani crawl", sharedWith: ["u-aisha"], createdAt: new Date().toISOString() },
     ],
     following: ["u-meera"],
+    followers: 12,
     connections: { "u-meera": "accepted", "u-zara": "pending-in", "u-arjun": "pending-in" },
   };
 }

@@ -28,7 +28,7 @@ export async function loadMyAccount(): Promise<{ account: SessionState | null; e
   if (!user) return { account: null };
 
   const streakSince = new Date(Date.now() - 40 * 86_400_000).toISOString();
-  const [profileRes, prefRes, consentRes, followRes, connRes, blockRes, muteRes, wishRes, planRes, inventoryRes, streakRes] = await Promise.all([
+  const [profileRes, prefRes, consentRes, followRes, followerRes, connRes, blockRes, muteRes, wishRes, planRes, inventoryRes, streakRes] = await Promise.all([
     supabase
       .from("profiles")
       .select("id, name, handle, bio, avatar, plan_id, plan_since, plan_expires_at, onboarded_at, notifications_enabled")
@@ -37,6 +37,7 @@ export async function loadMyAccount(): Promise<{ account: SessionState | null; e
     supabase.from("user_preferences").select("*").eq("user_id", user.id).maybeSingle(),
     supabase.from("consents").select("adult, respectful, terms_version, accepted_at").eq("user_id", user.id).order("accepted_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("follows").select("following_id").eq("follower_id", user.id),
+    supabase.from("follows").select("*", { count: "exact", head: true }).eq("following_id", user.id),
     supabase.from("connections").select("requester_id, addressee_id, status").or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`),
     supabase.from("blocks").select("blocked_id").eq("blocker_id", user.id),
     supabase.from("mutes").select("muted_id").eq("user_id", user.id),
@@ -46,7 +47,7 @@ export async function loadMyAccount(): Promise<{ account: SessionState | null; e
     supabase.from("streak_events").select("type, at").eq("user_id", user.id).gte("at", streakSince).order("at"),
   ]);
 
-  const failed = [profileRes, prefRes, consentRes, followRes, connRes, blockRes, muteRes, wishRes, planRes, inventoryRes, streakRes].find((r) => r.error);
+  const failed = [profileRes, prefRes, consentRes, followRes, followerRes, connRes, blockRes, muteRes, wishRes, planRes, inventoryRes, streakRes].find((r) => r.error);
   if (failed?.error) return { account: null, error: failed.error.message };
   if (!profileRes.data) return { account: null, error: "Profile was not created. Check the signup trigger in the migration." };
 
@@ -66,6 +67,7 @@ export async function loadMyAccount(): Promise<{ account: SessionState | null; e
       preferences: prefRes.data,
       consent,
       following: (followRes.data ?? []).map((r) => r.following_id),
+      followers: followerRes.count ?? 0,
       connections: connRes.data ?? [],
       blocked: (blockRes.data ?? []).map((r) => r.blocked_id),
       muted: (muteRes.data ?? []).map((r) => r.muted_id),

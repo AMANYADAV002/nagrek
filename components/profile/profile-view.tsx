@@ -63,7 +63,7 @@ function fromSession(s: SessionState): DisplayProfile {
     streak: calculateStreak(s.streakEvents),
     planId: s.plan,
     avatar: s.avatar,
-    followers: 12,
+    followers: s.followers ?? 0,
     following: s.following.length,
     connections: Object.values(s.connections).filter((c) => c === "accepted").length,
   };
