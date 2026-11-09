@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored agent skills (third-party example code, not part of the app).
+    ".cursor/**",
   ]),
 ]);
 

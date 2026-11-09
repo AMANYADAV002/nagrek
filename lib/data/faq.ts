@@ -21,6 +21,6 @@ export const faqs = [
   },
   {
     q: "What are streaks and rewards?",
-    a: "Each day you complete a meeting counts toward your monthly streak. Hit milestones to unlock sponsor coupons for restaurants, cafes and hotels, plus bonus avatar items.",
+    a: "Plan a visit with a connection, then scan each other's code when you meet in person. Every verified visit grows your visiting streak, and milestones unlock one-time sponsor coupons for restaurants, cafes and hotels for both of you.",
   },
 ]

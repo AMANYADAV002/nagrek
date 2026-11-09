@@ -11,7 +11,7 @@ import { GlassCard } from "@/components/glass/glass-card";
 import { GradientButton } from "@/components/glass/gradient-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { loadMyAccount } from "@/lib/actions/account";
+import { fetchMyAccount } from "@/lib/account-client";
 import { homeFor } from "@/lib/guards";
 import { hydrateSession, snapshotOf, updateSession, useSession } from "@/lib/mock/session";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -52,11 +52,12 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
   }
 
   async function enterWithAccount() {
-    const loaded = await loadMyAccount();
+    const loaded = await fetchMyAccount();
     if (loaded.error) return toast.error(loaded.error);
     if (loaded.account) hydrateSession(loaded.account);
     const snap = loaded.account ? snapshotOf(loaded.account) : { signedIn: true, onboarded: false, plan: null };
-    router.refresh();
+    // push loads the destination from the server. refresh() here runs before the
+    // App Router is ready and throws "Router action dispatched before initialization".
     router.push(homeFor(snap));
   }
 

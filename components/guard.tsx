@@ -16,7 +16,11 @@ export function Guard({ need, children }: { need: Requirement; children: React.R
   const target = session ? redirectFor(need, snapshotOf(session)) : null;
 
   useEffect(() => {
-    if (target) router.replace(target);
+    if (!target) return;
+    // Defer past the first paint. Calling the router during initialization throws
+    // and Next reloads the page, which makes the app look frozen.
+    const id = requestAnimationFrame(() => router.replace(target));
+    return () => cancelAnimationFrame(id);
   }, [target, router]);
 
   if (!session || target) return <FullScreenLoader />;

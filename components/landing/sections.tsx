@@ -19,7 +19,7 @@ function Kicker({ left, right }: { left: string; right: string }) {
 
 export function CravingGrid() {
   return (
-    <section id="cravings" className="mx-auto max-w-[1440px] px-[6%] py-20" data-reveal>
+    <section id="cravings" className="mx-auto max-w-[1440px] scroll-mt-20 px-[6%] py-16 md:py-20" data-reveal>
       <Kicker left="01 / What are you craving?" right="Pick a plate" />
       <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <h2 className="text-4xl font-medium">
@@ -36,7 +36,8 @@ export function CravingGrid() {
           <Link
             key={c.id}
             href="/sign-up"
-            className="group glass relative h-64 overflow-hidden rounded-3xl md:h-80"
+            data-reveal-item
+            className="group glass relative h-56 overflow-hidden rounded-3xl transition-[translate,box-shadow] duration-500 hover:-translate-y-2 hover:shadow-[0_24px_60px_-20px_#ff7e5f66] sm:h-64 md:h-80"
             aria-label={`Match over ${c.name}`}
           >
             <Image
@@ -44,7 +45,7 @@ export function CravingGrid() {
               alt={`${c.name} — one of the cravings you can match over`}
               fill
               sizes="(max-width: 768px) 50vw, 25vw"
-              className="object-cover opacity-80 transition-transform duration-700 group-hover:scale-110"
+              className="object-cover opacity-80 transition-[scale,opacity] duration-700 group-hover:scale-110 group-hover:opacity-100"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-ink via-ink/30 to-transparent" />
             <span className="absolute top-4 left-4 text-[9px] tracking-[0.2em] text-soft">0{i + 1}</span>
@@ -72,7 +73,7 @@ export function HowItWorks() {
     { icon: ShieldCheck, title: "Safe by design.", text: "18+ only, report and block everywhere, approximate location only." },
   ];
   return (
-    <section id="how-it-works" className="mx-auto max-w-[1440px] border-t border-white/8 px-[6%] py-20" data-reveal>
+    <section id="how-it-works" className="mx-auto max-w-[1440px] scroll-mt-20 border-t border-white/8 px-[6%] py-16 md:py-20" data-reveal>
       <Kicker left="02 / No reservation needed" right="Four little steps" />
       <div className="grid gap-12 lg:grid-cols-2">
         <div>
@@ -88,13 +89,13 @@ export function HowItWorks() {
         </div>
         <ol className="border-t border-white/8">
           {steps.map((s, i) => (
-            <li key={s.title} className="flex items-start gap-6 border-b border-white/8 py-6">
-              <span className="min-w-10 font-heading text-xl text-peach">0{i + 1}</span>
+            <li key={s.title} data-reveal-item className="group flex items-start gap-4 border-b border-white/8 py-6 transition-colors hover:bg-white/[0.02] sm:gap-6">
+              <span className="min-w-10 font-heading text-xl text-peach transition-transform duration-300 group-hover:translate-x-1">0{i + 1}</span>
               <div className="flex-1">
                 <h3 className="mb-1.5 text-base font-semibold">{s.title}</h3>
                 <p className="text-sm text-soft">{s.text}</p>
               </div>
-              <s.icon className="size-5 text-peach" aria-hidden />
+              <s.icon className="size-5 shrink-0 text-peach transition-transform duration-300 group-hover:scale-125 group-hover:-rotate-6" aria-hidden />
             </li>
           ))}
         </ol>
@@ -124,7 +125,7 @@ export function Marquee() {
 export function PlansTeaser() {
   const free = freePreview();
   return (
-    <section id="plans" className="mx-auto max-w-[1440px] px-[6%] py-20" data-reveal>
+    <section id="plans" className="mx-auto max-w-[1440px] scroll-mt-20 px-[6%] py-16 md:py-20" data-reveal>
       <Kicker left="03 / Plans" right={free ? "Free during early access" : "30-day passes · no auto-renewal"} />
       <h2 className="mb-10 text-4xl font-medium">
         Pick your <span className="text-brand">appetite.</span>
@@ -133,7 +134,11 @@ export function PlansTeaser() {
         {plans.map((p) => (
           <div
             key={p.id}
-            className={cn("glass relative rounded-3xl p-7", p.highlight && "ring-1 ring-peach/50 glow")}
+            data-reveal-item
+            className={cn(
+              "glass relative rounded-3xl p-7 transition-[translate,box-shadow] duration-500 hover:-translate-y-1.5",
+              p.highlight && "ring-1 ring-peach/50 glow",
+            )}
           >
             {p.highlight && (
               <span className="absolute -top-3 left-7 rounded-full bg-brand px-3 py-1 text-[10px] font-bold text-ink">Most loved</span>
@@ -166,7 +171,7 @@ export function PlansTeaser() {
 
 export function Faq() {
   return (
-    <section id="faq" className="mx-auto max-w-[1440px] border-t border-white/8 px-[6%] py-20" data-reveal>
+    <section id="faq" className="mx-auto max-w-[1440px] scroll-mt-20 border-t border-white/8 px-[6%] py-16 md:py-20" data-reveal>
       <div className="grid gap-12 lg:grid-cols-[1fr_1.4fr]">
         <div>
           <h2 className="text-4xl font-medium">
@@ -178,7 +183,7 @@ export function Faq() {
         </div>
         <div>
           {faqs.map((f) => (
-            <details key={f.q} className="group border-b border-white/8">
+            <details key={f.q} data-reveal-item className="group border-b border-white/8">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-5 py-6 font-heading text-lg font-medium [&::-webkit-details-marker]:hidden">
                 {f.q}
                 <Plus className="size-5 shrink-0 text-peach transition-transform group-open:rotate-45" aria-hidden />
@@ -194,9 +199,9 @@ export function Faq() {
 
 export function FinalCta() {
   return (
-    <section className="mx-auto max-w-[1440px] px-[6%] py-20" data-reveal>
-      <div className="glass relative overflow-hidden rounded-[2rem] px-8 py-16 text-center">
-        <div aria-hidden className="absolute -top-32 left-1/2 size-96 -translate-x-1/2 rounded-full bg-[radial-gradient(ellipse,#ff7e5f40,transparent_70%)]" />
+    <section className="mx-auto max-w-[1440px] px-[6%] py-16 md:py-20" data-reveal>
+      <div className="glass relative overflow-hidden rounded-[2rem] px-6 py-14 text-center sm:px-8 sm:py-16">
+        <div aria-hidden data-parallax="25" className="absolute -top-32 left-1/2 size-96 -translate-x-1/2 rounded-full bg-[radial-gradient(ellipse,#ff7e5f40,transparent_70%)]" />
         <h2 className="relative text-4xl font-medium md:text-5xl">
           Your next meal has a <span className="text-brand">seat for two.</span>
         </h2>

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { loadMyAccount } from "@/lib/actions/account";
+import { fetchMyAccount } from "@/lib/account-client";
 import { blankSession, hydrateSession } from "@/lib/mock/session";
 import { backendEnabled } from "@/lib/supabase/env";
 
@@ -13,7 +13,7 @@ export function AccountSync() {
   useEffect(() => {
     if (started.current || !backendEnabled()) return;
     started.current = true;
-    loadMyAccount().then((result) => {
+    fetchMyAccount().then((result) => {
       if (result.error) toast.error(result.error);
       hydrateSession(result.account ?? blankSession());
     });

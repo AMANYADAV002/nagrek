@@ -25,7 +25,16 @@ export function IncomingCallAlert() {
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
     if (!live || !supabase || !userId) return;
-    void loadIncomingCall().then((c) => c && setCall(c));
+    // Server actions hold up navigation, so only call one when a call is actually ringing.
+    void supabase
+      .from("calls")
+      .select("id")
+      .eq("callee_id", userId)
+      .eq("status", "ringing")
+      .limit(1)
+      .then(({ data }) => {
+        if (data?.length) void loadIncomingCall().then((c) => c && setCall(c));
+      });
     const channel = supabase
       .channel(`incoming-calls:${userId}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "calls", filter: `callee_id=eq.${userId}` }, (change) => {
