@@ -3,14 +3,14 @@
 import { useSyncExternalStore } from "react";
 import { defaultAvatar } from "@/lib/config/avatar-items";
 import type { SessionSnapshot } from "@/lib/guards";
+import { backendEnabled } from "@/lib/supabase/env";
 import type { StreakEvent } from "@/lib/streak/calc";
 import type { AvatarConfig, Consent, PlanId, Preferences, Story } from "@/lib/types";
 
 /**
- * Phase 1 mock session, persisted in localStorage so the whole flow can be
- * clicked through without a backend.
- * TODO(phase-2): replace with Supabase Auth + Postgres (profiles, user_preferences,
- * consents, subscriptions, follows, connections, wishlist_items, ...).
+ * Client session. Without Supabase env vars this is the Phase 1 demo, stored
+ * in localStorage. With env vars, AccountSync fills it from Postgres and
+ * nothing is written to localStorage.
  */
 export interface WishItem {
   id: string;
@@ -87,7 +87,8 @@ function seedStreakEvents(days: number): StreakEvent[] {
   }));
 }
 
-export function initialSession(): SessionState {
+/** Empty account. Used for real Supabase users and for signed-out state. */
+export function blankSession(): SessionState {
   return {
     user: null,
     bio: "",
@@ -98,15 +99,12 @@ export function initialSession(): SessionState {
     planSince: null,
     avatar: defaultAvatar,
     ownedItems: [],
-    streakEvents: seedStreakEvents(6),
+    streakEvents: [],
     claimedRewards: [],
-    wishlist: [
-      { id: "w1", kind: "place", title: "Third Wave Brewhouse", note: "Try the cold brew flight", sharedWith: [], createdAt: new Date().toISOString() },
-      { id: "w2", kind: "food", title: "Hyderabadi biryani crawl", sharedWith: ["u-aisha"], createdAt: new Date().toISOString() },
-    ],
+    wishlist: [],
     futurePlans: [],
-    following: ["u-meera"],
-    connections: { "u-meera": "accepted", "u-zara": "pending-in", "u-arjun": "pending-in" },
+    following: [],
+    connections: {},
     blocked: [],
     muted: [],
     seenStories: [],
@@ -117,10 +115,27 @@ export function initialSession(): SessionState {
   };
 }
 
+/** Demo session, with a streak and a few people so the prototype is clickable. */
+export function initialSession(): SessionState {
+  return {
+    ...blankSession(),
+    streakEvents: seedStreakEvents(6),
+    wishlist: [
+      { id: "w1", kind: "place", title: "Third Wave Brewhouse", note: "Try the cold brew flight", sharedWith: [], createdAt: new Date().toISOString() },
+      { id: "w2", kind: "food", title: "Hyderabadi biryani crawl", sharedWith: ["u-aisha"], createdAt: new Date().toISOString() },
+    ],
+    following: ["u-meera"],
+    connections: { "u-meera": "accepted", "u-zara": "pending-in", "u-arjun": "pending-in" },
+  };
+}
+
 let state: SessionState | null = null;
+let hydrated = false;
 const listeners = new Set<() => void>();
 
-function load(): SessionState {
+function load(): SessionState | null {
+  // Real accounts are loaded by AccountSync. Until then, render the loading guard.
+  if (backendEnabled()) return hydrated ? state : null;
   if (state) return state;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -132,6 +147,7 @@ function load(): SessionState {
 }
 
 function persist() {
+  if (backendEnabled() || !state) return;
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
@@ -139,19 +155,27 @@ function persist() {
   }
 }
 
-export function updateSession(updater: Partial<SessionState> | ((s: SessionState) => Partial<SessionState>)) {
-  const current = load();
-  const patch = typeof updater === "function" ? updater(current) : updater;
-  if (Object.keys(patch).length === 0) return;
-  state = { ...current, ...patch };
+function emit(next: SessionState) {
+  state = next;
+  hydrated = true;
   persist();
   listeners.forEach((l) => l());
 }
 
+export function updateSession(updater: Partial<SessionState> | ((s: SessionState) => Partial<SessionState>)) {
+  const current = (backendEnabled() ? state ?? blankSession() : load()) ?? blankSession();
+  const patch = typeof updater === "function" ? updater(current) : updater;
+  if (Object.keys(patch).length === 0) return;
+  emit({ ...current, ...patch });
+}
+
+/** Replace the in-memory session with the account loaded from Supabase. */
+export function hydrateSession(next: SessionState) {
+  emit(next);
+}
+
 export function resetSession() {
-  state = initialSession();
-  persist();
-  listeners.forEach((l) => l());
+  emit(backendEnabled() ? blankSession() : initialSession());
 }
 
 function subscribe(listener: () => void) {

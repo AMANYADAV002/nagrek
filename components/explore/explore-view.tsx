@@ -12,6 +12,8 @@ import { Stagger, StaggerItem } from "@/components/motion/stagger";
 import type { AmbientSynth } from "@/lib/audio/synth";
 import { cravingEmoji } from "@/lib/data/cravings";
 import { uid } from "@/lib/format";
+import { addWish } from "@/lib/actions/account";
+import { backendEnabled } from "@/lib/supabase/env";
 import { places } from "@/lib/mock/places";
 import { updateSession, useSession } from "@/lib/mock/session";
 
@@ -113,10 +115,17 @@ export function ExploreView() {
                   size="sm"
                   variant="glass"
                   onClick={() => {
+                    const localId = uid("w");
+                    const note = `${p.cuisine} in ${p.area}`;
                     updateSession((s) => ({
-                      wishlist: [{ id: uid("w"), kind: "place", title: p.name, note: `${p.cuisine} in ${p.area}`, sharedWith: [], createdAt: new Date().toISOString() }, ...s.wishlist],
+                      wishlist: [{ id: localId, kind: "place", title: p.name, note, sharedWith: [], createdAt: new Date().toISOString() }, ...s.wishlist],
                     }));
                     toast.success(`${p.name} added to your wish list`);
+                    if (!backendEnabled()) return;
+                    void addWish({ kind: "place", title: p.name, note }).then((saved) => {
+                      if (!saved.ok) return toast.error(saved.error ?? "Could not save");
+                      if (saved.id) updateSession((s) => ({ wishlist: s.wishlist.map((w) => (w.id === localId ? { ...w, id: saved.id! } : w)) }));
+                    });
                   }}
                 >
                   <Plus /> Add to wish list

@@ -2,11 +2,23 @@
 
 "Never eat alone." Match with someone nearby who is craving the same food, meet over a short video call, then go eat together.
 
-**Status: Phase 1, an animated prototype on mock data.** Every screen is clickable end to end. Nothing talks to a backend yet; see `DECISIONS.md` for what is mocked and why.
+**Status: Phase 2 backend is wired, and the Phase 1 demo still runs with no keys.** With `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` set, accounts, onboarding, plans, profiles, follows, connections and the wish list persist in Supabase. Everything else (live matching, video, stories, streaks, payments) is still mocked. See `DECISIONS.md`.
 
 ## Stack
 
-Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 · shadcn/ui (Base UI) · Framer Motion · GSAP · Zod · Vitest. Planned for later phases: Supabase, Razorpay, WebRTC.
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 · shadcn/ui (Base UI) · Framer Motion · GSAP · Zod · Vitest · Supabase (Auth, Postgres, RLS). Still mocked: Razorpay, WebRTC, live matching, stories storage, streak rewards.
+
+## Supabase (Phase 2)
+
+The app runs the full demo with no keys. To persist accounts:
+
+1. Create a project at [supabase.com](https://supabase.com). Under **Authentication → Providers**, keep Email on (with "Confirm email" on, new users confirm through the emailed link). Under **Authentication → URL Configuration**, set the Site URL and add `https://<your-domain>/auth/callback` (and `http://localhost:3000/auth/callback` for local) to the redirect URLs. Add Google only if you have OAuth credentials.
+2. In the SQL editor, run every file in `supabase/migrations/` in filename order, then `supabase/seed.sql`.
+3. Copy `.env.example` to `.env.local` and fill in `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the publishable key) and `SUPABASE_SERVICE_ROLE_KEY` (the secret key, server only).
+4. Run `npm run check:supabase`. It creates a pre-confirmed throwaway user, checks sign-in, profile, consent-gated onboarding, plan protection and account deletion, then removes the user.
+5. Restart `npm run dev`. Sign up creates a profile. Onboarding, the chosen plan, profile edits, follows, connections and the wish list are stored under Row Level Security.
+
+`npm test` checks the matching and streak rules, and that every table in the migration has Row Level Security turned on.
 
 ## Getting started
 
@@ -24,7 +36,7 @@ npm run dev                  # http://localhost:3000
 | `npm run build` / `npm start` | Production build / serve |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Vitest unit tests (matching, streak, rewards, guards, 18+ gate) |
+| `npm test` | Vitest (matching, streak, rewards, guards, account mapping, RLS) |
 
 ### Demo walkthrough
 

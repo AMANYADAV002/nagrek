@@ -9,7 +9,9 @@ import {
 import { Wordmark } from "@/components/brand/wordmark";
 import { LayeredAvatar } from "@/components/avatar/layered-avatar";
 import { getPlan } from "@/lib/config/plans";
-import { resetSession, useSession } from "@/lib/mock/session";
+import { useSession } from "@/lib/mock/session";
+import { signOutEverywhere } from "@/lib/db/remote";
+import { backendEnabled } from "@/lib/supabase/env";
 import { cn } from "@/lib/utils";
 
 const items = [
@@ -80,14 +82,11 @@ export function AppNav() {
             <button
               type="button"
               onClick={() => {
-                resetSession();
-                // Full reload: a client push would race the layout Guard's redirect to /sign-in.
-                // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-                window.location.href = "/";
+                void signOutEverywhere();
               }}
               className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-soft hover:bg-white/5 hover:text-cream"
             >
-              <LogOut className="size-3.5" aria-hidden /> Sign out (resets demo)
+              <LogOut className="size-3.5" aria-hidden /> {backendEnabled() ? "Sign out" : "Sign out (resets demo)"}
             </button>
           </div>
         )}

@@ -14,6 +14,8 @@ import { GradientButton, GradientLink } from "@/components/glass/gradient-button
 import { ReportDialog } from "@/components/safety/report-dialog";
 import { AddStoryButton } from "@/components/stories/add-story-button";
 import { Textarea } from "@/components/ui/textarea";
+import { sendConnection, setFollow } from "@/lib/actions/account";
+import { syncBackend } from "@/lib/db/remote";
 import { updateSession, useSession } from "@/lib/mock/session";
 import type { MockUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -121,7 +123,10 @@ export function FeedbackForm({ meetingId, partner, food }: { meetingId: string; 
                 <GradientButton
                   size="sm"
                   variant={following ? "glass" : "brand"}
-                  onClick={() => updateSession((s) => ({ following: s.following.includes(partner.id) ? s.following : [...s.following, partner.id] }))}
+                  onClick={() => {
+                    updateSession((s) => ({ following: s.following.includes(partner.id) ? s.following : [...s.following, partner.id] }));
+                    syncBackend(() => setFollow(partner.id, true));
+                  }}
                 >
                   {following ? <Check /> : <UserPlus />} {following ? "Following" : `Follow ${first}`}
                 </GradientButton>
@@ -131,6 +136,7 @@ export function FeedbackForm({ meetingId, partner, food }: { meetingId: string; 
                   disabled={!!connection}
                   onClick={() => {
                     updateSession((s) => ({ connections: { ...s.connections, [partner.id]: "pending-out" } }));
+                    syncBackend(() => sendConnection(partner.id));
                     toast.success("Connection request sent");
                   }}
                 >

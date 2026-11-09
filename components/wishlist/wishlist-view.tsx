@@ -14,6 +14,9 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { uid } from "@/lib/format";
+import { addFuturePlan, addWish, deleteWish, shareWish } from "@/lib/actions/account";
+import { syncBackend } from "@/lib/db/remote";
+import { backendEnabled } from "@/lib/supabase/env";
 import { updateSession, useSession, type WishItem } from "@/lib/mock/session";
 import { getMockUser } from "@/lib/mock/users";
 
@@ -45,14 +48,19 @@ export function WishlistView() {
   if (!session) return null;
   const friends = Object.entries(session.connections).filter(([, s]) => s === "accepted").map(([id]) => getMockUser(id)).filter((u) => !!u);
 
-  function add(e: React.FormEvent) {
+  async function add(e: React.FormEvent) {
     e.preventDefault();
     const parsed = wishSchema.safeParse({ kind, title, note: note || undefined });
     if (!parsed.success) return setError(parsed.error.issues[0]?.message ?? "Invalid");
     setError(null);
-    updateSession((s) => ({ wishlist: [{ id: uid("w"), ...parsed.data, sharedWith: [], createdAt: new Date().toISOString() }, ...s.wishlist] }));
+    const localId = uid("w");
+    updateSession((s) => ({ wishlist: [{ id: localId, ...parsed.data, sharedWith: [], createdAt: new Date().toISOString() }, ...s.wishlist] }));
     setTitle("");
     setNote("");
+    if (!backendEnabled()) return;
+    const saved = await addWish(parsed.data);
+    if (!saved.ok) return toast.error(saved.error ?? "Could not save");
+    if (saved.id) updateSession((s) => ({ wishlist: s.wishlist.map((w) => (w.id === localId ? { ...w, id: saved.id! } : w)) }));
   }
 
   return (
@@ -112,7 +120,7 @@ export function WishlistView() {
                           <p className="mt-1 text-xs text-peach">Shared with {w.sharedWith.map((i) => getMockUser(i)?.name.split(" ")[0]).join(", ")}</p>
                         )}
                       </div>
-                      <button type="button" aria-label={`Delete ${w.title}`} onClick={() => updateSession((s) => ({ wishlist: s.wishlist.filter((x) => x.id !== w.id) }))} className="grid size-8 place-items-center rounded-full text-soft hover:bg-white/10 hover:text-red-300">
+                      <button type="button" aria-label={`Delete ${w.title}`} onClick={() => { updateSession((s) => ({ wishlist: s.wishlist.filter((x) => x.id !== w.id) })); syncBackend(() => deleteWish(w.id)); }} className="grid size-8 place-items-center rounded-full text-soft hover:bg-white/10 hover:text-red-300">
                         <Trash2 className="size-4" />
                       </button>
                     </div>
@@ -159,6 +167,7 @@ function ShareDialog({ item, friends, onClose }: { item: WishItem | null; friend
           onClick={() => {
             if (!item) return;
             updateSession((s) => ({ wishlist: s.wishlist.map((w) => (w.id === item.id ? { ...w, sharedWith: [...new Set([...w.sharedWith, ...picked])] } : w)) }));
+            syncBackend(() => shareWish(item.id, picked));
             toast.success("Shared!");
             setPicked([]);
             onClose();
@@ -183,6 +192,7 @@ function PlanDialog({ item, friends, onClose }: { item: WishItem | null; friends
     if (!parsed.success) return setError(parsed.error.issues[0]?.message ?? "Invalid plan");
     // TODO(phase-2): insert into `plans_future` and notify invitees.
     updateSession((s) => ({ futurePlans: [...s.futurePlans, { id: uid("fp"), wishId: item.id, ...parsed.data }] }));
+    syncBackend(() => addFuturePlan({ wishId: item.id, ...parsed.data }));
     toast.success("Meetup proposed! Invites sent.");
     setDate("");
     setPlace("");

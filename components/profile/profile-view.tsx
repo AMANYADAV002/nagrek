@@ -19,7 +19,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatInr, getPlan } from "@/lib/config/plans";
 import { cravingEmoji } from "@/lib/data/cravings";
 import { toneLabel } from "@/lib/format";
-import { resetSession, updateSession, useSession, type SessionState } from "@/lib/mock/session";
+import { updateSession, useSession, type SessionState } from "@/lib/mock/session";
+import { deleteAccount, saveProfile, sendConnection, setBlock, setFollow, setMute } from "@/lib/actions/account";
+import { signOutEverywhere, syncBackend } from "@/lib/db/remote";
+import { backendEnabled } from "@/lib/supabase/env";
 import { buildStoryGroups, groupSeen } from "@/lib/stories";
 import { calculateStreak } from "@/lib/streak/calc";
 import type { MockUser, PlanId } from "@/lib/types";
@@ -100,7 +103,10 @@ export function ProfileView({ user }: { user?: MockUser }) {
         <p className="text-sm text-soft">You will not see each other anywhere on Nagrek.</p>
         <GradientButton
           variant="outline"
-          onClick={() => updateSession((s) => ({ blocked: s.blocked.filter((x) => x !== p.id) }))}
+          onClick={() => {
+            updateSession((s) => ({ blocked: s.blocked.filter((x) => x !== p.id) }));
+            syncBackend(() => setBlock(p.id, false));
+          }}
         >
           Unblock
         </GradientButton>
@@ -147,6 +153,7 @@ export function ProfileView({ user }: { user?: MockUser }) {
                     size="sm"
                     onClick={() => {
                       updateSession({ bio: bio.trim() });
+                      syncBackend(() => saveProfile({ bio: bio.trim() }));
                       setEditing(false);
                       toast.success("Bio updated");
                     }}
@@ -204,11 +211,12 @@ export function ProfileView({ user }: { user?: MockUser }) {
             <GradientButton
               size="sm"
               variant={following ? "glass" : "brand"}
-              onClick={() =>
+              onClick={() => {
                 updateSession((s) => ({
                   following: following ? s.following.filter((x) => x !== p.id) : [...s.following, p.id],
-                }))
-              }
+                }));
+                syncBackend(() => setFollow(p.id, !following));
+              }}
             >
               {following ? <Check /> : <UserPlus />} {following ? "Following" : "Follow"}
             </GradientButton>
@@ -218,6 +226,7 @@ export function ProfileView({ user }: { user?: MockUser }) {
               disabled={!!connection}
               onClick={() => {
                 updateSession((s) => ({ connections: { ...s.connections, [p.id]: "pending-out" } }));
+                syncBackend(() => sendConnection(p.id));
                 toast.success(`Connection request sent to ${p.name}`);
               }}
             >
@@ -227,9 +236,10 @@ export function ProfileView({ user }: { user?: MockUser }) {
             <GradientButton
               size="sm"
               variant="ghost"
-              onClick={() =>
-                updateSession((s) => ({ muted: muted ? s.muted.filter((x) => x !== p.id) : [...s.muted, p.id] }))
-              }
+              onClick={() => {
+                updateSession((s) => ({ muted: muted ? s.muted.filter((x) => x !== p.id) : [...s.muted, p.id] }));
+                syncBackend(() => setMute(p.id, !muted));
+              }}
             >
               <VolumeX /> {muted ? "Unmute" : "Mute"}
             </GradientButton>
@@ -238,6 +248,7 @@ export function ProfileView({ user }: { user?: MockUser }) {
               variant="ghost"
               onClick={() => {
                 updateSession((s) => ({ blocked: [...s.blocked, p.id], following: s.following.filter((x) => x !== p.id) }));
+                syncBackend(() => setBlock(p.id, true));
                 toast(`${p.name} is blocked`);
               }}
             >
@@ -308,7 +319,13 @@ export function ProfileView({ user }: { user?: MockUser }) {
                 <span className="flex items-center gap-2">
                   <Bell className="size-4 text-peach" aria-hidden /> &quot;Request to join&quot; notifications
                 </span>
-                <Switch checked={session.notificationsEnabled} onCheckedChange={(c) => updateSession({ notificationsEnabled: c })} />
+                <Switch
+                  checked={session.notificationsEnabled}
+                  onCheckedChange={(c) => {
+                    updateSession({ notificationsEnabled: c });
+                    syncBackend(() => saveProfile({ notificationsEnabled: c }));
+                  }}
+                />
               </label>
               <Link href="/avatar" className="block text-sm text-peach hover:underline">Edit avatar</Link>
               <div className={cn("rounded-2xl border p-4", confirmDelete ? "border-red-400/40 bg-red-500/10" : "border-white/10")}>
@@ -319,12 +336,12 @@ export function ProfileView({ user }: { user?: MockUser }) {
                       <GradientButton
                         size="sm"
                         variant="danger"
-                        onClick={() => {
-                          // TODO(phase-2): server action that deletes the auth user + cascades all rows + storage objects.
-                          resetSession();
-                          // Full reload: a client push would race the layout Guard's redirect to /sign-in.
-                          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-                          window.location.href = "/";
+                        onClick={async () => {
+                          if (backendEnabled()) {
+                            const result = await deleteAccount();
+                            if (!result.ok) return toast.error(result.error ?? "Could not delete the account");
+                          }
+                          await signOutEverywhere();
                         }}
                       >
                         Yes, delete everything

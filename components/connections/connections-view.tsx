@@ -11,6 +11,8 @@ import { GradientButton, GradientLink } from "@/components/glass/gradient-button
 import { PageHeader } from "@/components/glass/section-heading";
 import { EmptyState } from "@/components/glass/states";
 import { toneLabel } from "@/lib/format";
+import { cancelConnection, respondConnection, sendConnection, setBlock, setFollow } from "@/lib/actions/account";
+import { syncBackend } from "@/lib/db/remote";
 import { updateSession, useSession } from "@/lib/mock/session";
 import { mockUsers } from "@/lib/mock/users";
 import type { MockUser } from "@/lib/types";
@@ -88,26 +90,26 @@ export function ConnectionsView() {
                     <div className="flex shrink-0 gap-1.5">
                       {tab === "requests" && (
                         <>
-                          <IconBtn label="Reject" onClick={() => { setConn(u.id, null); toast(`Declined ${u.name.split(" ")[0]}`); }}><X /></IconBtn>
-                          <IconBtn label="Accept" brand onClick={() => { setConn(u.id, "accepted"); toast.success(`You and ${u.name.split(" ")[0]} are connected`); }}><Check /></IconBtn>
+                          <IconBtn label="Reject" onClick={() => { setConn(u.id, null); syncBackend(() => respondConnection(u.id, false)); toast(`Declined ${u.name.split(" ")[0]}`); }}><X /></IconBtn>
+                          <IconBtn label="Accept" brand onClick={() => { setConn(u.id, "accepted"); syncBackend(() => respondConnection(u.id, true)); toast.success(`You and ${u.name.split(" ")[0]} are connected`); }}><Check /></IconBtn>
                         </>
                       )}
                       {tab === "friends" && (
                         <GradientLink href="/wishlist" size="sm"><CalendarPlus /> Plan</GradientLink>
                       )}
                       {tab === "sent" && (
-                        <GradientButton size="sm" variant="ghost" onClick={() => setConn(u.id, null)}>Cancel</GradientButton>
+                        <GradientButton size="sm" variant="ghost" onClick={() => { setConn(u.id, null); syncBackend(() => cancelConnection(u.id)); }}>Cancel</GradientButton>
                       )}
                       {tab === "discover" && (
                         <>
-                          <GradientButton size="sm" variant={following ? "glass" : "outline"} onClick={() => updateSession((s) => ({ following: following ? s.following.filter((x) => x !== u.id) : [...s.following, u.id] }))}>
+                          <GradientButton size="sm" variant={following ? "glass" : "outline"} onClick={() => { updateSession((s) => ({ following: following ? s.following.filter((x) => x !== u.id) : [...s.following, u.id] })); syncBackend(() => setFollow(u.id, !following)); }}>
                             {following ? "Following" : "Follow"}
                           </GradientButton>
-                          <IconBtn label="Send connection request" brand onClick={() => { setConn(u.id, "pending-out"); toast.success("Request sent"); }}><UserPlus /></IconBtn>
+                          <IconBtn label="Send connection request" brand onClick={() => { setConn(u.id, "pending-out"); syncBackend(() => sendConnection(u.id)); toast.success("Request sent"); }}><UserPlus /></IconBtn>
                         </>
                       )}
                       {tab === "blocked" && (
-                        <GradientButton size="sm" variant="outline" onClick={() => updateSession((s) => ({ blocked: s.blocked.filter((x) => x !== u.id) }))}>
+                        <GradientButton size="sm" variant="outline" onClick={() => { updateSession((s) => ({ blocked: s.blocked.filter((x) => x !== u.id) })); syncBackend(() => setBlock(u.id, false)); }}>
                           <Ban /> Unblock
                         </GradientButton>
                       )}

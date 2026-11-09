@@ -18,8 +18,10 @@ import { Slider } from "@/components/ui/slider";
 import { cuisineChips, cravingEmoji } from "@/lib/data/cravings";
 import { cities, nearestCity } from "@/lib/data/cities";
 import { TERMS_VERSION } from "@/lib/data/legal";
+import { saveOnboarding } from "@/lib/actions/account";
 import { track } from "@/lib/analytics";
 import { updateSession, useSession } from "@/lib/mock/session";
+import { backendEnabled } from "@/lib/supabase/env";
 import type { Dietary, GroupSize, Tone } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
@@ -123,8 +125,12 @@ export function OnboardingWizard() {
     setIndex((i) => Math.max(0, i - 1));
   }
 
-  function finish() {
-    // TODO(phase-2): upsert `user_preferences` + insert into `consents` via a validated server action.
+  async function finish() {
+    if (backendEnabled()) {
+      const saved = await saveOnboarding(draft);
+      if (!saved.ok) return toast.error(saved.error ?? "Could not save your preferences");
+    }
+    // Preferences also stay in the local session so the rest of the demo keeps working offline.
     updateSession({
       preferences: {
         foodInterests: draft.foodInterests,

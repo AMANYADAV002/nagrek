@@ -1,11 +1,13 @@
 "use client";
 
+import { AccountSync } from "@/components/account-sync";
 import { MotionConfig } from "framer-motion";
 import { Toaster } from "sonner";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <MotionConfig reducedMotion="user">
+      <AccountSync />
       {children}
       <Toaster
         theme="dark"

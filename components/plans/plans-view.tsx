@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Check, CreditCard, Crown, Lock, Minus, ShieldCheck, Sparkles, Zap } from "lucide-react";
@@ -9,9 +9,11 @@ import { Wordmark } from "@/components/brand/wordmark";
 import { GradientButton } from "@/components/glass/gradient-button";
 import { Eyebrow } from "@/components/glass/section-heading";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { comparisonRows, formatInr, plans, type Plan } from "@/lib/config/plans";
+import { loadPlans, saveMockPlan } from "@/lib/actions/account";
+import { comparisonRows, formatInr, plans as fallbackPlans, type Plan } from "@/lib/config/plans";
 import { track } from "@/lib/analytics";
 import { updateSession, useSession } from "@/lib/mock/session";
+import { backendEnabled } from "@/lib/supabase/env";
 import { cn } from "@/lib/utils";
 
 const icons = { plus: Zap, premium: Sparkles, ultra: Crown } as const;
@@ -19,8 +21,16 @@ const icons = { plus: Zap, premium: Sparkles, ultra: Crown } as const;
 export function PlansView() {
   const router = useRouter();
   const session = useSession();
+  const [catalog, setCatalog] = useState(fallbackPlans);
   const [checkout, setCheckout] = useState<Plan | null>(null);
   const [status, setStatus] = useState<"idle" | "processing" | "failed">("idle");
+
+  useEffect(() => {
+    if (!backendEnabled()) return;
+    loadPlans().then((rows) => {
+      if (rows?.length) setCatalog(rows);
+    });
+  }, []);
 
   async function pay(simulateFailure = false) {
     if (!checkout) return;
@@ -31,6 +41,14 @@ export function PlansView() {
     if (simulateFailure) {
       setStatus("failed");
       return;
+    }
+    if (backendEnabled()) {
+      const saved = await saveMockPlan(checkout.id);
+      if (!saved.ok) {
+        setStatus("failed");
+        toast.error(saved.error ?? "Could not activate the plan");
+        return;
+      }
     }
     updateSession({ plan: checkout.id, planSince: new Date().toISOString() });
     track("payment", { plan: checkout.id, amount: checkout.priceInr });
@@ -43,7 +61,7 @@ export function PlansView() {
         <Wordmark />
         {session?.plan && (
           <span className="rounded-full border border-peach/40 px-3 py-1 text-xs text-peach">
-            Current: {plans.find((p) => p.id === session.plan)?.name}
+            Current: {catalog.find((p) => p.id === session.plan)?.name}
           </span>
         )}
       </div>
@@ -59,7 +77,7 @@ export function PlansView() {
       </div>
 
       <div className="grid gap-5 md:grid-cols-3">
-        {plans.map((p, i) => {
+        {catalog.map((p, i) => {
           const Icon = icons[p.id];
           const current = session?.plan === p.id;
           return (
@@ -123,7 +141,7 @@ export function PlansView() {
             <thead>
               <tr className="border-b border-white/10 text-left">
                 <th scope="col" className="p-4 font-medium text-soft">Feature</th>
-                {plans.map((p) => (
+                {catalog.map((p) => (
                   <th key={p.id} scope="col" className={cn("p-4 text-center font-semibold", p.highlight && "text-peach")}>
                     {p.name}
                   </th>
@@ -134,7 +152,7 @@ export function PlansView() {
               {comparisonRows.map((row) => (
                 <tr key={row.label} className="border-b border-white/5 last:border-0">
                   <th scope="row" className="p-4 text-left font-normal">{row.label}</th>
-                  {plans.map((p) => {
+                  {catalog.map((p) => {
                     const v = row.values[p.id];
                     return (
                       <td key={p.id} className="p-4 text-center">

@@ -14,9 +14,9 @@ Defaults chosen without asking, per the brief ("make sensible defaults, list the
 
 ## Phase 1 architecture
 
-- **Mock session in localStorage** (`lib/mock/session.ts`, key `nagrek.session.v1`), read through `useSyncExternalStore`. Every screen reads and writes this one store, so the whole flow is clickable and survives reloads. "Sign out" resets the demo.
-- **Route guards are client-side** in Phase 1 (`components/guard.tsx`), using a pure `redirectFor()` in `lib/guards.ts`. The proxy cannot read localStorage, so `proxy.ts` is a pass-through with `TODO(phase-2)`. The same `redirectFor()` rules will run in `proxy.ts` with the Supabase session.
-- **Supabase clients exist but return `null`** when env vars are missing, so nothing breaks without keys.
+- **Mock session in localStorage** when `NEXT_PUBLIC_SUPABASE_URL` is unset (`lib/mock/session.ts`). Set the Supabase keys and the same screens read and write Postgres instead; the demo keeps working with no project.
+- **Route guards:** client `<Guard>` always, and `proxy.ts` as well once Supabase is configured. Both use `redirectFor()` in `lib/guards.ts`.
+- **Supabase clients return `null`** when env vars are missing.
 - **Video room uses your real camera/mic locally** (permission, denied and unavailable states), and a mock remote participant. The signalling contract for N participants is in `lib/webrtc/types.ts`.
 - **Music is a Web Audio synth** (`lib/audio/synth.ts`) with piano, violin, soft and cafe presets, so no music licensing is needed for the prototype. Tracks accept an optional `src` for licensed files later. "Share music with partner" is a stub (Phase 5).
 - **Stories**: images are compressed client-side to a 1080px JPEG data URL and persisted. Videos (≤30s, ≤50 MB) use blob URLs and only last for the current page load. Real storage is Phase 4.
@@ -28,7 +28,11 @@ Defaults chosen without asking, per the brief ("make sensible defaults, list the
 - **Live requests** expire after 15 minutes. When fewer than 2 live matches exist, Nagrek pings up to 5 suitable users to "join" instead.
 - **Streak rule** (`lib/streak/calc.ts`): a day counts when the user completes a meeting or accepts a join request. The streak is the run of consecutive counting days ending today or yesterday, and it resets every calendar month. Milestones are at 3, 7, 15 and 30 days.
 - **Rewards**: eligibility checks claimed, expired, out of stock, plan rank, then streak. **Coupon codes never reach the client.** Claiming in Phase 1 only records the claim, and server-side issuance is `TODO(phase-6)`.
-- **Location privacy**: coordinates are rounded to 2 decimals (about 1 km) before storage, and other users only see area and city.
+- **Choosing a plan before Razorpay** calls `activate_mock_plan()`, which writes a `subscriptions` row with `provider = 'mock'`. Phase 3 removes that function and lets only the webhook grant a plan.
+- **Finishing onboarding** goes through `complete_onboarding()`, which sets `profiles.onboarded_at` only after an accepted consent row exists. Clients cannot write `onboarded_at`, so the 18+ and conduct agreement cannot be skipped.
+- **Email confirmation stays on.** Confirmation links land on `/auth/callback`. `npm run check:supabase` uses the secret key to create a pre-confirmed throwaway user for testing.
+- **Demo people** (`u-aisha` and the rest) are not database users. Follows, connections and invites aimed at them stay on this device. The same buttons persist once the other person has a real account (a uuid).
+- **Exact location and date of birth** are stored only in `user_preferences`, which the owner can read. Public profiles carry city and area. Coupon codes sit in `reward_codes` with no client policy.
 - **18+ gate**: date of birth is validated with Zod, and two confirmations are required. Consent is stored with a timestamp and `TERMS_VERSION` (`2026-11-draft-1`).
 - **Calls are never recorded.** A meeting becomes a story only if both people consent on the feedback screen.
 - **Avatar items**: basic items are free and premium items are one-time ₹19–₹99 purchases. Some items unlock with a 7, 15 or 30 day streak or the Ultra plan.

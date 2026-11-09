@@ -11,8 +11,11 @@ import { GlassCard } from "@/components/glass/glass-card";
 import { GradientButton } from "@/components/glass/gradient-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { loadMyAccount } from "@/lib/actions/account";
 import { homeFor } from "@/lib/guards";
-import { snapshotOf, updateSession, useSession } from "@/lib/mock/session";
+import { hydrateSession, snapshotOf, updateSession, useSession } from "@/lib/mock/session";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { backendEnabled } from "@/lib/supabase/env";
 import { track } from "@/lib/analytics";
 
 const signUpSchema = z.object({
@@ -40,13 +43,21 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
   const isSignUp = mode === "sign-up";
 
   function finish(name: string, email: string) {
-    // TODO(phase-2): supabase.auth.signUp / signInWithPassword.
     updateSession({
       user: { id: "me", name, email, handle: email.split("@")[0].replace(/[^a-z0-9._]/gi, "").toLowerCase() || "you" },
     });
     if (isSignUp) track("signup", { method: "password" });
     const next = session ? { ...snapshotOf(session), signedIn: true } : { signedIn: true, onboarded: false, plan: null };
     router.push(homeFor(next));
+  }
+
+  async function enterWithAccount() {
+    const loaded = await loadMyAccount();
+    if (loaded.error) return toast.error(loaded.error);
+    if (loaded.account) hydrateSession(loaded.account);
+    const snap = loaded.account ? snapshotOf(loaded.account) : { signedIn: true, onboarded: false, plan: null };
+    router.refresh();
+    router.push(homeFor(snap));
   }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -61,8 +72,34 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
     }
     setErrors({});
     setPending(true);
-    await new Promise((r) => setTimeout(r, 500));
     const email = parsed.data.email;
+
+    if (backendEnabled()) {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) {
+        setPending(false);
+        return toast.error("Supabase is not configured.");
+      }
+      if (isSignUp) {
+        const name = "name" in parsed.data ? parsed.data.name : email.split("@")[0];
+        const { data: created, error } = await supabase.auth.signUp({
+          email,
+          password: parsed.data.password,
+          options: { data: { name }, emailRedirectTo: `${location.origin}/auth/callback` },
+        });
+        setPending(false);
+        if (error) return toast.error(error.message);
+        track("signup", { method: "password" });
+        if (!created.session) return toast.success("Check your email to confirm your account, then sign in.");
+        return enterWithAccount();
+      }
+      const { error } = await supabase.auth.signInWithPassword({ email, password: parsed.data.password });
+      setPending(false);
+      if (error) return toast.error(error.message);
+      return enterWithAccount();
+    }
+
+    await new Promise((r) => setTimeout(r, 500));
     const name = "name" in parsed.data ? (parsed.data.name as string) : session?.user?.name ?? email.split("@")[0];
     finish(name, email);
   }
@@ -81,10 +118,17 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
           <GradientButton
             type="button"
             variant="glass"
-            onClick={() => {
-              // TODO(phase-2): supabase.auth.signInWithOAuth({ provider: "google" })
-              toast.info("Google sign-in connects in Phase 2 — using a demo account.");
-              finish(session?.user?.name ?? "Demo Foodie", "demo@nagrek.com");
+            onClick={async () => {
+              if (!backendEnabled()) {
+                toast.info("Google sign-in connects once Supabase is configured — using a demo account.");
+                finish(session?.user?.name ?? "Demo Foodie", "demo@nagrek.com");
+                return;
+              }
+              const { error } = await getSupabaseBrowserClient()!.auth.signInWithOAuth({
+                provider: "google",
+                options: { redirectTo: `${location.origin}/auth/callback` },
+              });
+              if (error) toast.error(error.message);
             }}
           >
             <GoogleIcon /> Continue with Google
@@ -92,7 +136,18 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
           <GradientButton
             type="button"
             variant="glass"
-            onClick={() => toast.success("Magic link sent! (Mocked — TODO(phase-2) supabase.auth.signInWithOtp)")}
+            onClick={async () => {
+              const email = (document.getElementById("email") as HTMLInputElement | null)?.value ?? "";
+              const parsed = z.object({ email: z.email("Enter your email above first") }).safeParse({ email });
+              if (!parsed.success) return toast.error(parsed.error.issues[0]?.message ?? "Enter your email above first");
+              if (!backendEnabled()) return toast.success("Magic link sent! (Demo only — add Supabase keys to send a real one.)");
+              const { error } = await getSupabaseBrowserClient()!.auth.signInWithOtp({
+                email: parsed.data.email,
+                options: { emailRedirectTo: `${location.origin}/auth/callback` },
+              });
+              if (error) return toast.error(error.message);
+              toast.success("Magic link sent. Check your inbox.");
+            }}
           >
             <Mail /> Email me a magic link
           </GradientButton>

@@ -1,8 +1,9 @@
 import type { PlanId } from "@/lib/types";
 
 /**
- * PLACEHOLDER PRICES — not final. Edit here (Phase 1) or in the `plans`
- * table (Phase 2+, TODO(phase-2)) without touching UI code.
+ * PLACEHOLDER PRICES — not final. Edit here for the demo, or in the `plans`
+ * table (supabase/seed.sql) once Supabase is configured. The plans page
+ * reads the table when it is available.
  */
 export interface Plan {
   id: PlanId;

@@ -4,7 +4,6 @@ import { createServerClient } from "@supabase/ssr";
 
 /**
  * Server Supabase client for Server Components, Route Handlers and Server Actions.
- * TODO(phase-2): used by auth, onboarding persistence and RLS-protected queries.
  */
 export async function getSupabaseServerClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

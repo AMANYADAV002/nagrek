@@ -3,9 +3,8 @@
 import { createBrowserClient } from "@supabase/ssr";
 
 /**
- * Browser Supabase client. Returns null until env vars are configured so the
- * Phase 1 prototype runs without a Supabase project.
- * TODO(phase-2): make required once auth moves to Supabase.
+ * Browser Supabase client. Returns null until env vars are configured, so the
+ * demo still runs with no project. Auth and account actions use it when set.
  */
 export function getSupabaseBrowserClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
