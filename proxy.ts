@@ -30,6 +30,7 @@ const RULES: { prefix: string; need: Requirement }[] = [
   { prefix: "/history", need: "plan" },
   { prefix: "/restaurants", need: "plan" },
   { prefix: "/verify-kyc", need: "plan" },
+  { prefix: "/digilocker", need: "plan" },
 ];
 
 export async function proxy(request: NextRequest) {
@@ -97,6 +98,8 @@ export const config = {
     "/restaurants/:path*",
     "/verify-kyc",
     "/verify-kyc/:path*",
+    "/digilocker",
+    "/digilocker/:path*",
     "/admin/:path*",
   ],
 };
