@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
@@ -18,9 +18,13 @@ import { Slider } from "@/components/ui/slider";
 import { cuisineChips, cravingEmoji } from "@/lib/data/cravings";
 import { cities, nearestCity } from "@/lib/data/cities";
 import { TERMS_VERSION } from "@/lib/data/legal";
-import { saveOnboarding } from "@/lib/actions/account";
+import { saveAccount } from "@/lib/account-save";
 import { track } from "@/lib/analytics";
-import { updateSession, useSession } from "@/lib/mock/session";
+import { homeFor } from "@/lib/guards";
+import { useDraft } from "@/lib/draft";
+import { snapshotOf, updateSession, useSession } from "@/lib/mock/session";
+import { whenRouterReady } from "@/lib/nav";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { backendEnabled } from "@/lib/supabase/env";
 import type { Dietary, GroupSize, Tone } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -92,14 +96,50 @@ const steps: StepDef[] = [
 export function OnboardingWizard() {
   const router = useRouter();
   const session = useSession();
-  const [index, setIndex] = useState(0);
+  const [index, setIndex, clearStep] = useDraft("onboarding-step", 0);
   const [dir, setDir] = useState(1);
-  const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [draft, setDraft, clearDraft] = useDraft("onboarding", emptyDraft);
   const [error, setError] = useState<string | null>(null);
   const [custom, setCustom] = useState("");
   const [locating, setLocating] = useState(false);
+  const seeded = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => () => {
+    alive.current = false;
+  }, []);
+  useEffect(() => {
+    if (!Number.isInteger(index) || index < 0 || index >= steps.length) setIndex(0);
+  }, [index, setIndex]);
 
-  const step = steps[index];
+  // Already saved: go to the right page instead of asking again.
+  useEffect(() => {
+    if (!session?.welcomed) return;
+    whenRouterReady(() => router.replace(homeFor(snapshotOf(session))));
+  }, [session, router]);
+
+  // A half-finished account comes back filled in.
+  useEffect(() => {
+    if (seeded.current || !session?.preferences) return;
+    seeded.current = true;
+    const p = session.preferences;
+    setDraft({
+      foodInterests: p.foodInterests,
+      tone: p.tone,
+      location: p.location,
+      dietary: p.dietary,
+      budget: p.budget,
+      groupSize: p.groupSize,
+      timeSlots: p.timeSlots,
+      languages: p.languages,
+      topics: p.topics,
+      goals: p.goals,
+      dateOfBirth: p.dateOfBirth?.slice(0, 10) ?? "",
+      adult: !!session.consent?.adult,
+      respectful: !!session.consent?.respectful,
+    });
+  }, [session]);
+
+  const step = steps[index] ?? steps[0];
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
   function validate(): boolean {
@@ -127,11 +167,15 @@ export function OnboardingWizard() {
 
   async function finish() {
     if (backendEnabled()) {
-      const saved = await saveOnboarding(draft);
+      const supabase = getSupabaseBrowserClient();
+      const userId = session?.user?.id;
+      if (!supabase || !userId) return toast.error("Not signed in");
+      const saved = await saveAccount(supabase, userId, draft);
       if (!saved.ok) return toast.error(saved.error ?? "Could not save your preferences");
     }
     // Preferences also stay in the local session so the rest of the demo keeps working offline.
     updateSession({
+      welcomed: true,
       preferences: {
         foodInterests: draft.foodInterests,
         tone: draft.tone as Tone,
@@ -148,7 +192,9 @@ export function OnboardingWizard() {
       consent: { adult: true, respectful: true, termsVersion: TERMS_VERSION, acceptedAt: new Date().toISOString() },
     });
     track("onboarding_complete", { foods: draft.foodInterests.length, tone: draft.tone });
-    router.push("/welcome");
+    clearDraft();
+    clearStep();
+    whenRouterReady(() => router.push("/welcome"));
   }
 
   function detectLocation() {
@@ -159,6 +205,7 @@ export function OnboardingWizard() {
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        if (!alive.current) return;
         const point = { lat: roundCoord(pos.coords.latitude), lng: roundCoord(pos.coords.longitude) };
         const city = nearestCity(point);
         set({ location: { ...draft.location, city: city.name, point } });
@@ -166,6 +213,7 @@ export function OnboardingWizard() {
         toast.success(`Located near ${city.name} (rounded to ~1 km)`);
       },
       () => {
+        if (!alive.current) return;
         setLocating(false);
         toast.error("Permission denied. No problem — choose your city manually.");
       },

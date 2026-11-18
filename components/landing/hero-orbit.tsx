@@ -47,7 +47,7 @@ function FoodCard({
         <div className="drift size-full" style={{ "--t": `${float}s`, "--d": `${delay}ms` } as React.CSSProperties}>
           <div className="glass group relative size-full overflow-hidden rounded-[1.75rem] p-2 shadow-2xl transition-transform duration-500 hover:scale-[1.04]">
             <div className="relative size-full overflow-hidden rounded-[1.35rem]">
-              <Image src={image} alt="" fill sizes={sizes} priority={priority} loading={priority ? "eager" : undefined} className="object-cover transition-transform duration-700 group-hover:scale-110" />
+              <Image src={image} alt="" fill sizes={sizes} preload={priority} loading="eager" className="object-cover transition-transform duration-700 group-hover:scale-110" />
             </div>
             <span className="absolute bottom-5 left-6 text-[9px] font-bold tracking-[0.2em] [text-shadow:0_2px_8px_#000]">{label}</span>
           </div>

@@ -1,7 +1,9 @@
 "use client";
 
 import { AccountSync } from "@/components/account-sync";
+import { StaleClientGuard } from "@/components/stale-client-guard";
 import { IncomingCallAlert } from "@/components/calls/incoming-call";
+import { MatchCallPrompt } from "@/components/matching/match-call-prompt";
 import { NotificationsProvider } from "@/components/notifications/notifications-provider";
 import { MotionConfig } from "framer-motion";
 import { Toaster } from "sonner";
@@ -9,9 +11,11 @@ import { Toaster } from "sonner";
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <MotionConfig reducedMotion="user">
+      <StaleClientGuard />
       <AccountSync />
       <NotificationsProvider>{children}</NotificationsProvider>
       <IncomingCallAlert />
+      <MatchCallPrompt />
       <Toaster
         theme="dark"
         position="top-center"

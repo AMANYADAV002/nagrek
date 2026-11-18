@@ -1,0 +1,24 @@
+---
+description: Which Nagrek subagent and skill to use for each engineering role
+alwaysApply: true
+---
+
+# Team delegation
+
+Project subagents live in `.cursor/agents/` and are invoked by name. Built-in subagents cover the independent checks.
+
+| Role | Subagent | Also read |
+|---|---|---|
+| Requirements and status | `project-manager` | `writing-plans` |
+| Architecture | `principal-architect` | inspect with the `explore` subagent |
+| UI and client state | `frontend-engineer` | `react-performance` |
+| Server actions and rules | `backend-engineer` | `backend-patterns`, `api-design-principles` |
+| Schema, RLS, SQL | `database-engineer` | `postgres-patterns`, `database-migrations` |
+| Crashes and failed tests | `debugging-engineer` | `systematic-debugging` |
+| Tests and regression | `qa-engineer` | `verification-before-completion`, `webapp-testing` |
+| Auth, RLS, secrets | `security-engineer` | `security-review` skill, then the built-in `security-review` subagent |
+| Lag and re-renders | `performance-engineer` | `react-performance` |
+| Build and CI | `devops-engineer` | built-in `ci-investigator` for a failed PR check |
+| Independent review | `code-reviewer` | `requesting-code-review`, then built-in `bugbot` |
+
+Do not create a second agent for a role that already has a file here. Do not install third-party hooks: this repo has no `.cursor/hooks.json`, and ECC or Superpowers session hooks would run on every chat.

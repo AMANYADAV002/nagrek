@@ -1,5 +1,6 @@
+import { bestTier, dietCompatible, foodLevel } from "@/lib/matching/food";
 import { mockUsers } from "@/lib/mock/users";
-import { rankCandidates, toneCompatible, type MatchProfile } from "@/lib/matching/score";
+import { matchingScore, toneCompatible, type MatchProfile } from "@/lib/matching/score";
 import type { MockUser, Preferences } from "@/lib/types";
 
 /** Requests expire after this long unless matched or cancelled. */
@@ -35,9 +36,18 @@ function toProfile(u: MockUser): MatchProfile {
 }
 
 export function findLiveMatches(me: Preferences, craving: string, excluded: string[]) {
-  const pool = mockUsers.filter((u) => ONLINE_IDS.has(u.id) && !excluded.includes(u.id));
-  const ranked = rankCandidates(profileFromPreferences(me), pool.map((u) => ({ ...toProfile(u), user: u })), craving);
-  return ranked.map((r) => ({ user: r.candidate.user, score: r.result.score, distanceKm: r.result.distanceKm }));
+  const mine = profileFromPreferences(me);
+  const pool = mockUsers.filter((u) => ONLINE_IDS.has(u.id) && !excluded.includes(u.id) && dietCompatible(me.dietary, u.dietary));
+  const ranked = bestTier(
+    pool.flatMap((u) => {
+      const tier = foodLevel(craving, me.foodInterests, null, u.foodInterests);
+      if (!tier) return [];
+      const result = matchingScore(mine, toProfile(u), { craving, tier });
+      if (!result.compatible) return [];
+      return [{ tier, user: u, score: result.score, distanceKm: result.distanceKm }];
+    }),
+  ).sort((a, b) => b.score - a.score);
+  return ranked.map((r) => ({ user: r.user, score: r.score, distanceKm: r.distanceKm }));
 }
 
 /**
@@ -45,10 +55,12 @@ export function findLiveMatches(me: Preferences, craving: string, excluded: stri
  * (online or not) and whose tone is compatible get a "request to join" ping.
  */
 export function joinPingCandidates(me: Preferences, craving: string, excluded: string[]) {
-  const c = craving.toLowerCase();
-  return mockUsers
-    .filter((u) => !excluded.includes(u.id))
-    .filter((u) => u.foodInterests.some((f) => f.toLowerCase() === c))
-    .filter((u) => toneCompatible(me.tone, u.tone))
-    .slice(0, MAX_JOIN_PINGS_PER_REQUEST);
+  const ranked = bestTier(
+    mockUsers.flatMap((u) => {
+      if (excluded.includes(u.id) || !dietCompatible(me.dietary, u.dietary) || !toneCompatible(me.tone, u.tone)) return [];
+      const tier = foodLevel(craving, me.foodInterests, null, u.foodInterests);
+      return tier ? [{ tier, user: u }] : [];
+    }),
+  );
+  return ranked.slice(0, MAX_JOIN_PINGS_PER_REQUEST).map((r) => r.user);
 }

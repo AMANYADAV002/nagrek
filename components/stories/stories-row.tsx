@@ -1,21 +1,37 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StoryRing } from "@/components/avatar/story-ring";
 import { AddStoryButton } from "@/components/stories/add-story-button";
 import { StoryViewer } from "@/components/story-viewer/story-viewer";
 import { useSession } from "@/lib/mock/session";
 import { groupSeen, storyHandlers, useStoryGroups } from "@/lib/stories";
+import { clearStoryReturn, peekStoryReturn } from "@/lib/stories/return";
 
 /** Horizontal Instagram-style row of story rings with the full-screen viewer. */
 export function StoriesRow({ onlyUserId, showAdd = true }: { onlyUserId?: string; showAdd?: boolean }) {
   const session = useSession();
   const [open, setOpen] = useState<number | null>(null);
+  const [resume, setResume] = useState<{ storyId: string; comments: boolean } | null>(null);
   const all = useStoryGroups(session);
+  const groups = onlyUserId ? all.filter((g) => g.userId === onlyUserId) : all;
   const [handlers] = useState(storyHandlers);
+  const groupKey = groups.map((group) => group.userId).join();
+
+  useEffect(() => {
+    if (!groups.length) return;
+    const saved = peekStoryReturn(window.location.pathname, "stories-row");
+    if (!saved) return;
+    const idx = groups.findIndex((group) => group.userId === saved.groupUserId);
+    if (idx < 0) return;
+    clearStoryReturn();
+    queueMicrotask(() => {
+      setResume({ storyId: saved.storyId, comments: saved.comments });
+      setOpen(idx);
+    });
+  }, [groupKey, groups]);
 
   if (!session) return null;
-  const groups = onlyUserId ? all.filter((g) => g.userId === onlyUserId) : all;
 
   return (
     <>
@@ -39,7 +55,16 @@ export function StoriesRow({ onlyUserId, showAdd = true }: { onlyUserId?: string
         ))}
       </div>
       {open !== null && groups.length > 0 && (
-        <StoryViewer groups={groups} startGroup={open} onClose={() => setOpen(null)} onSeen={handlers.onSeen} onDelete={handlers.onDelete} />
+        <StoryViewer
+          groups={groups}
+          startGroup={open}
+          startStoryId={resume?.storyId}
+          startComments={resume?.comments}
+          surface="stories-row"
+          onClose={() => { setOpen(null); setResume(null); clearStoryReturn(); }}
+          onSeen={handlers.onSeen}
+          onDelete={handlers.onDelete}
+        />
       )}
     </>
   );

@@ -6,10 +6,13 @@ import { CalendarPlus, Camera, CameraOff, Mic, MicOff, Phone, PhoneOff, Wifi, Wi
 import { toast } from "sonner";
 import { LayeredAvatar } from "@/components/avatar/layered-avatar";
 import { GradientButton } from "@/components/glass/gradient-button";
+import { CallChat } from "@/components/calls/call-chat";
 import { PlanVisitDialog } from "@/components/visits/plan-visit-dialog";
-import { answerCall, endCall, getCall, getCallIce, markCallConnected, type CallStatus, type CallView } from "@/lib/actions/calls";
+import { answerCall, endCall, markCallConnected, type CallStatus, type CallView } from "@/lib/actions/calls";
+import { loadTurnCredentials } from "@/lib/webrtc/load-turn";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { usePeer } from "@/lib/webrtc/use-peer";
+import type { CallTextMessage } from "@/lib/webrtc/types";
 import { cn } from "@/lib/utils";
 
 type Media = "requesting" | "on" | "blocked";
@@ -36,6 +39,8 @@ export function CallRoom({ view }: { view: CallView }) {
   const [camOn, setCamOn] = useState(true);
   const [elapsed, setElapsed] = useState(0);
   const [planOpen, setPlanOpen] = useState(false);
+  const [inbox, setInbox] = useState<CallTextMessage[]>([]);
+  const [holdLink, setHoldLink] = useState(false);
   const [busy, setBusy] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
   const localVideo = useRef<HTMLVideoElement>(null);
@@ -82,10 +87,12 @@ export function CallRoom({ view }: { view: CallView }) {
 
   useEffect(() => {
     if (status !== "ringing") return;
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
     const poll = setInterval(async () => {
-      const latest = await getCall(view.id);
-      if (latest) setStatus(latest.status);
-    }, 3000);
+      const { data } = await supabase.from("calls").select("status").eq("id", view.id).maybeSingle();
+      if (data?.status) setStatus(data.status as CallStatus);
+    }, 4_000);
     return () => clearInterval(poll);
   }, [status, view.id]);
 
@@ -95,10 +102,11 @@ export function CallRoom({ view }: { view: CallView }) {
     partnerId: view.partner.id,
     role: view.role,
     localStream,
-    enabled: status === "accepted" && media !== "requesting",
+    enabled: status === "accepted" && media !== "requesting" && !holdLink,
     video,
-    loadIce: () => getCallIce(view.id),
+    loadIce: () => loadTurnCredentials({ callId: view.id }),
     onConnected: () => void markCallConnected(view.id),
+    onChat: (message) => setInbox((list) => (list.some((m) => m.id === message.id) ? list : [...list, message])),
   });
 
   useEffect(() => {
@@ -144,6 +152,30 @@ export function CallRoom({ view }: { view: CallView }) {
       streamRef.current?.getTracks().forEach((t) => t.stop());
     }
   }, [status]);
+
+  // Refresh, a closed tab, or leaving this page ends the row, so nobody stays "on a call".
+  // The short delay lets React remount in development without hanging up a live call.
+  useEffect(() => {
+    const key = `nagrek-call-end:${view.id}`;
+    const pending = (window as unknown as Record<string, number | undefined>)[key];
+    if (pending) {
+      clearTimeout(pending);
+      delete (window as unknown as Record<string, number | undefined>)[key];
+    }
+    const onHide = () => {
+      if (ending.current) return;
+      ending.current = true;
+      void endCall(view.id);
+    };
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      (window as unknown as Record<string, number | undefined>)[key] = window.setTimeout(() => {
+        delete (window as unknown as Record<string, number | undefined>)[key];
+        void endCall(view.id);
+      }, 600);
+    };
+  }, [view.id]);
 
   // Caller gives up after the ring window; the server records it as missed for the callee.
   useEffect(() => {
@@ -214,6 +246,14 @@ export function CallRoom({ view }: { view: CallView }) {
               {peer.state === "weak" ? "Weak network" : "Good connection"}
             </p>
           )}
+          {peer.state === "failed" && !over && (
+            <button type="button" className="mt-3 rounded-full bg-white/15 px-4 py-2 text-sm" onClick={() => {
+              setHoldLink(true);
+              window.setTimeout(() => setHoldLink(false), 400);
+            }}>
+              Try reconnecting
+            </button>
+          )}
           {media === "blocked" && !over && (
             <p className="mt-2 text-xs text-peach">Microphone{video ? "/camera" : ""} blocked. They can&apos;t hear you until you allow it in browser settings.</p>
           )}
@@ -254,6 +294,16 @@ export function CallRoom({ view }: { view: CallView }) {
                 <RoundButton label={camOn ? "Turn camera off" : "Turn camera on"} active={!camOn} onClick={() => setCamOn((c) => !c)}>
                   {camOn ? <Camera /> : <CameraOff />}
                 </RoundButton>
+              )}
+              {status === "accepted" && (
+                <CallChat
+                  me={view.me}
+                  partnerId={view.partner.id}
+                  partnerName={view.partner.name}
+                  inbox={inbox}
+                  send={peer.sendChat}
+                  canSend={peer.state === "connecting" || peer.state === "connected" || peer.state === "weak" || peer.state === "reconnecting"}
+                />
               )}
               <RoundButton label="Plan a visit" onClick={() => setPlanOpen(true)}>
                 <CalendarPlus />

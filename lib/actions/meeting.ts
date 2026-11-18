@@ -5,8 +5,6 @@ import { getCaller, startOfIndianDay, type Fail } from "@/lib/server/caller";
 import { rateLimited, SLOW_DOWN } from "@/lib/server/rate-limit";
 import { loadStreakEvents, recordMeetingStreak } from "@/lib/streak/server";
 import type { StreakEvent } from "@/lib/streak/calc";
-import { iceConfigFor } from "@/lib/webrtc/turn";
-import { stunServersFromEnv, type IceConfig } from "@/lib/webrtc/types";
 
 /** Calls shorter than this do not count toward streaks. */
 const MIN_MEETING_SECONDS = 60;
@@ -21,13 +19,6 @@ async function participant(matchId: string) {
   if (!match || (match.user_a !== caller.userId && match.user_b !== caller.userId)) return null;
   const partnerId = match.user_a === caller.userId ? match.user_b : match.user_a;
   return { ...caller, match, partnerId: partnerId as string };
-}
-
-/** STUN for everyone, plus short-lived TURN credentials for people in a live match. */
-export async function getIceServers(matchId: string): Promise<IceConfig> {
-  const p = await participant(matchId);
-  if (p?.match.status !== "live") return { iceServers: stunServersFromEnv(), relayOnly: false };
-  return iceConfigFor(p.userId);
 }
 
 /** First time the two browsers connect. */

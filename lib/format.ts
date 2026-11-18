@@ -12,6 +12,19 @@ export function toneLabel(tone: string): string {
   return tone === "professional" ? "Professional" : tone === "casual" ? "Casual" : "Any tone";
 }
 
+const DIET_LABELS: Record<string, string> = {
+  veg: "Vegetarian",
+  "non-veg": "Non-vegetarian",
+  vegan: "Vegan",
+  eggetarian: "Eggetarian",
+  halal: "Halal",
+  jain: "Jain",
+};
+
+export function dietaryLabel(diet: string): string {
+  return DIET_LABELS[diet] ?? diet;
+}
+
 export function uid(prefix = "id"): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }

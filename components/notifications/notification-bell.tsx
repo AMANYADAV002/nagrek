@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { CallButtons } from "@/components/calls/call-buttons";
 import { useNotifications, type AppNotification } from "@/components/notifications/notifications-provider";
 import { GradientButton } from "@/components/glass/gradient-button";
+import { respondCravingInvite } from "@/lib/actions/history";
 import { acceptJoin } from "@/lib/actions/matching";
 import { respondStoryConsent } from "@/lib/actions/stories";
 import { cravingEmoji } from "@/lib/data/cravings";
@@ -69,9 +70,9 @@ function Item({ note, onDone }: { note: AppNotification; onDone: () => void }) {
         </GradientButton>
       </div>
     );
-  } else if (note.kind === "join_accepted" || note.kind === "match") {
+  } else if (note.kind === "join_accepted" || note.kind === "match" || note.kind === "match_accepted") {
     icon = <Utensils className="size-4" aria-hidden />;
-    body = note.kind === "join_accepted" ? <>Someone accepted your {food} {emoji} request!</> : <>Someone matched with your {food} {emoji} craving!</>;
+    body = note.kind === "match" ? <>Someone matched with your {food} {emoji} craving!</> : <>Someone accepted your {food} {emoji} request!</>;
     actions = (
       <GradientButton
         size="sm"
@@ -84,6 +85,37 @@ function Item({ note, onDone }: { note: AppNotification; onDone: () => void }) {
       >
         Open match
       </GradientButton>
+    );
+  } else if (note.kind === "craving_invite") {
+    icon = <Utensils className="size-4" aria-hidden />;
+    body = <>{note.payload.name ?? "Someone"} wants to meet again for {food} {emoji}.</>;
+    const answer = async (accept: boolean) => {
+      setBusy(true);
+      const res = await respondCravingInvite(note.payload.inviteId ?? "", accept);
+      setBusy(false);
+      if (!res.ok) return toast.error(res.error);
+      markRead([note.id]);
+      onDone();
+      if (accept) {
+        toast.success("You're on. You can call, message, and pick a place.");
+        window.dispatchEvent(new Event("nagrek:match-live"));
+      } else toast.message("Request declined. Your chat is still there.");
+    };
+    actions = unread && (
+      <div className="mt-2 flex gap-2">
+        <GradientButton size="sm" variant="ghost" disabled={busy} onClick={() => void answer(false)}>Reject</GradientButton>
+        <GradientButton size="sm" disabled={busy} onClick={() => void answer(true)}>Accept</GradientButton>
+      </div>
+    );
+  } else if (note.kind === "craving_accepted" || note.kind === "craving_declined") {
+    icon = <Utensils className="size-4" aria-hidden />;
+    body = note.kind === "craving_accepted"
+      ? <>{note.payload.name ?? "They"} accepted your {food} {emoji} craving.</>
+      : <>{note.payload.name ?? "They"} declined your {food} {emoji} craving.</>;
+    actions = note.payload.partnerId && (
+      <Link href={`/history/${note.payload.partnerId}`} onClick={() => { markRead([note.id]); onDone(); }} className="mt-1 inline-block text-xs text-peach underline">
+        Open chat
+      </Link>
     );
   } else if (note.kind === "story_consent_request") {
     icon = <Camera className="size-4" aria-hidden />;

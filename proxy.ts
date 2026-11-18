@@ -27,12 +27,18 @@ const RULES: { prefix: string; need: Requirement }[] = [
   { prefix: "/feedback", need: "plan" },
   { prefix: "/call", need: "plan" },
   { prefix: "/visits", need: "plan" },
+  { prefix: "/history", need: "plan" },
+  { prefix: "/restaurants", need: "plan" },
+  { prefix: "/verify-kyc", need: "plan" },
 ];
 
 export async function proxy(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return NextResponse.next();
+  // Server actions authenticate themselves (getCaller) and can refresh the auth cookie.
+  // Running the page rules here only added two Supabase round trips to every action.
+  if (request.method === "POST" && request.headers.has("next-action")) return NextResponse.next();
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(url, key, {
@@ -86,6 +92,11 @@ export const config = {
     "/feedback/:path*",
     "/call/:path*",
     "/visits/:path*",
+    "/history/:path*",
+    "/restaurants",
+    "/restaurants/:path*",
+    "/verify-kyc",
+    "/verify-kyc/:path*",
     "/admin/:path*",
   ],
 };

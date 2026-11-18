@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -19,7 +19,8 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { formatInr, getPlan } from "@/lib/config/plans";
 import { cravingEmoji } from "@/lib/data/cravings";
-import { toneLabel } from "@/lib/format";
+import { dietaryLabel, toneLabel } from "@/lib/format";
+import { ageFrom } from "@/lib/validation/onboarding";
 import { updateSession, useSession, type SessionState } from "@/lib/mock/session";
 import { deleteAccount, saveProfile, sendConnection, setBlock, setFollow, setMute } from "@/lib/actions/account";
 import { signOutEverywhere, syncBackend } from "@/lib/db/remote";
@@ -27,6 +28,7 @@ import { isUuid } from "@/lib/db/map";
 import { daysLeft } from "@/lib/payments/plan-status";
 import { backendEnabled } from "@/lib/supabase/env";
 import { groupSeen, storyHandlers, useStoryGroups } from "@/lib/stories";
+import { clearStoryReturn, peekStoryReturn } from "@/lib/stories/return";
 import { calculateStreak } from "@/lib/streak/calc";
 import type { MockUser, PlanId } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -40,6 +42,8 @@ interface DisplayProfile {
   area?: string;
   foods: string[];
   tone: string;
+  dietary: string;
+  age: number | null;
   trustScore: number | null;
   streak: number;
   planId: PlanId | null;
@@ -60,6 +64,11 @@ function fromSession(s: SessionState): DisplayProfile {
     area: s.preferences?.location.area,
     foods: s.preferences?.foodInterests ?? [],
     tone: s.preferences?.tone ?? "random",
+    dietary: s.preferences?.dietary ?? "",
+    age: (() => {
+      const years = s.preferences?.dateOfBirth ? ageFrom(s.preferences.dateOfBirth) : -1;
+      return years > 0 ? years : null;
+    })(),
     trustScore: avgRating,
     streak: calculateStreak(s.streakEvents),
     planId: s.plan,
@@ -73,22 +82,39 @@ function fromSession(s: SessionState): DisplayProfile {
 function fromUser(u: MockUser, s: SessionState): DisplayProfile {
   return {
     id: u.id, name: u.name, handle: u.handle, bio: u.bio, city: u.city, area: u.area, foods: u.foodInterests,
+    dietary: u.dietary, age: u.age && u.age > 0 ? u.age : null,
     // Real people's plans are private; only demo people show a badge.
     tone: u.tone, trustScore: u.trustScore, streak: u.streak, planId: isUuid(u.id) ? null : u.plan, avatar: u.avatar,
     followers: u.followers + (s.following.includes(u.id) ? 1 : 0), following: u.following, connections: u.connections,
   };
 }
 
-export function ProfileView({ user }: { user?: MockUser }) {
+export function ProfileView({ user, backHref, backLabel = "Back to matches" }: { user?: MockUser; backHref?: string; backLabel?: string }) {
   const session = useSession();
   const router = useRouter();
   const [viewer, setViewer] = useState(false);
+  const [resume, setResume] = useState<{ storyId: string; comments: boolean } | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [bio, setBio] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const allGroups = useStoryGroups(session);
   const [handlers] = useState(storyHandlers);
+  const groupKey = allGroups.map((group) => group.userId).join();
+
+  useEffect(() => {
+    if (!allGroups.length) return;
+    const saved = peekStoryReturn(window.location.pathname, "profile");
+    if (!saved) return;
+    const mine = session?.user?.id;
+    const match = allGroups.some((group) => group.userId === saved.groupUserId || (group.isMine && saved.groupUserId === mine));
+    if (!match) return;
+    clearStoryReturn();
+    queueMicrotask(() => {
+      setResume({ storyId: saved.storyId, comments: saved.comments });
+      setViewer(true);
+    });
+  }, [groupKey, allGroups, session?.user?.id]);
 
   if (!session) return null;
   const isMe = !user;
@@ -128,6 +154,11 @@ export function ProfileView({ user }: { user?: MockUser }) {
 
   return (
     <div className="space-y-6">
+      {backHref && (
+        <Link href={backHref} className="inline-flex text-sm font-semibold text-peach underline-offset-4 hover:underline">
+          {backLabel}
+        </Link>
+      )}
       <GlassCard className="relative overflow-hidden p-6 md:p-9">
         <div aria-hidden className="absolute -top-24 -right-24 size-72 rounded-full bg-[radial-gradient(ellipse,#ff7e5f33,transparent_70%)]" />
         <div className="relative flex flex-col gap-6 md:flex-row md:items-center">
@@ -143,7 +174,7 @@ export function ProfileView({ user }: { user?: MockUser }) {
           </motion.div>
           <div className="flex-1 space-y-3">
             <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-3xl font-medium">{p.name}</h1>
+              <h1 className="text-3xl font-medium">{p.name}{p.age && p.age > 0 ? `, ${p.age}` : ""}</h1>
               {plan && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-brand px-3 py-1 text-[11px] font-bold text-ink">
                   <Crown className="size-3" aria-hidden /> {plan.name}
@@ -200,6 +231,7 @@ export function ProfileView({ user }: { user?: MockUser }) {
                 <Flame className="size-3.5 text-peach" aria-hidden /> {p.streak}-day streak
               </span>
               <span>{toneLabel(p.tone)}</span>
+              {p.dietary && <span>{dietaryLabel(p.dietary)}</span>}
             </div>
           </div>
           <div className="flex gap-6 md:flex-col md:gap-3 md:text-right">
@@ -382,7 +414,10 @@ export function ProfileView({ user }: { user?: MockUser }) {
       {viewer && groups.length > 0 && (
         <StoryViewer
           groups={groups}
-          onClose={() => setViewer(false)}
+          startStoryId={resume?.storyId}
+          startComments={resume?.comments}
+          surface="profile"
+          onClose={() => { setViewer(false); setResume(null); clearStoryReturn(); }}
           onSeen={handlers.onSeen}
           onDelete={handlers.onDelete}
         />

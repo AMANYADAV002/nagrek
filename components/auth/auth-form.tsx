@@ -14,7 +14,9 @@ import { Label } from "@/components/ui/label";
 import { fetchMyAccount } from "@/lib/account-client";
 import { createLocalAccount } from "@/lib/actions/local-signup";
 import { homeFor } from "@/lib/guards";
+import { useDraft } from "@/lib/draft";
 import { hydrateSession, snapshotOf, updateSession, useSession } from "@/lib/mock/session";
+import { whenRouterReady } from "@/lib/nav";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { backendEnabled } from "@/lib/supabase/env";
 import { track } from "@/lib/analytics";
@@ -52,6 +54,8 @@ function GoogleIcon() {
 export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
   const router = useRouter();
   const session = useSession();
+  const [emailDraft, setEmailDraft] = useDraft("auth-email", "");
+  const [nameDraft, setNameDraft] = useDraft("auth-name", "");
   const [errors, setErrors] = useState<Errors>({});
   const [pending, setPending] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
@@ -79,17 +83,18 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
     });
     if (isSignUp) track("signup", { method: "password" });
     const next = session ? { ...snapshotOf(session), signedIn: true } : { signedIn: true, onboarded: false, plan: null };
-    router.push(homeFor(next));
+    whenRouterReady(() => router.push(homeFor(next)));
   }
 
   async function enterWithAccount() {
     const loaded = await fetchMyAccount();
     if (loaded.error) return toast.error(loaded.error);
-    if (loaded.account) hydrateSession(loaded.account);
-    const snap = loaded.account ? snapshotOf(loaded.account) : { signedIn: true, onboarded: false, plan: null };
+    if (!loaded.account) return toast.error("Signed in, but your saved details could not be loaded. Try again.");
+    hydrateSession(loaded.account);
+    const next = snapshotOf(loaded.account);
     // push loads the destination from the server. refresh() here runs before the
     // App Router is ready and throws "Router action dispatched before initialization".
-    router.push(homeFor(snap));
+    whenRouterReady(() => router.push(homeFor(next)));
   }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -215,11 +220,11 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
         <form onSubmit={onSubmit} noValidate className="space-y-4">
           {isSignUp && (
             <Field id="name" label="Display name" error={errors.name}>
-              <Input id="name" name="name" autoComplete="name" placeholder="Priya" aria-invalid={!!errors.name} className="h-11 rounded-xl" />
+              <Input id="name" name="name" autoComplete="name" placeholder="Priya" value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} aria-invalid={!!errors.name} className="h-11 rounded-xl" />
             </Field>
           )}
           <Field id="email" label="Email" error={errors.email}>
-            <Input id="email" name="email" type="email" autoComplete="email" placeholder="you@example.com" aria-invalid={!!errors.email} className="h-11 rounded-xl" />
+            <Input id="email" name="email" type="email" autoComplete="email" placeholder="you@example.com" value={emailDraft} onChange={(e) => setEmailDraft(e.target.value)} aria-invalid={!!errors.email} className="h-11 rounded-xl" />
           </Field>
           <Field id="password" label="Password" error={errors.password}>
             <Input

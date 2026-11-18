@@ -1,15 +1,14 @@
 "use server";
 
-import { TERMS_VERSION } from "@/lib/data/legal";
-import { accountFromRows, isUuid, preferencesRow, publicProfilePatch } from "@/lib/db/map";
+import { saveAccount } from "@/lib/account-save";
+import { loadAccount } from "@/lib/account-load";
+import { isUuid } from "@/lib/db/map";
 import type { Plan } from "@/lib/config/plans";
 import type { AvatarConfig, PlanId } from "@/lib/types";
 import type { SessionState } from "@/lib/mock/session";
-import type { StreakEvent } from "@/lib/streak/calc";
 import { blockedEitherWay } from "@/lib/people";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
-import { onboardingSchema } from "@/lib/validation/onboarding";
 
 type Result = { ok: true; skipped?: boolean; id?: string } | { ok: false; error: string };
 
@@ -23,60 +22,7 @@ async function client() {
 export async function loadMyAccount(): Promise<{ account: SessionState | null; error?: string }> {
   const supabase = await getSupabaseServerClient();
   if (!supabase) return { account: null };
-  const { data: auth } = await supabase.auth.getUser();
-  const user = auth.user;
-  if (!user) return { account: null };
-
-  const streakSince = new Date(Date.now() - 40 * 86_400_000).toISOString();
-  const [profileRes, prefRes, consentRes, followRes, followerRes, connRes, blockRes, muteRes, wishRes, planRes, inventoryRes, streakRes] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select("id, name, handle, bio, avatar, plan_id, plan_since, plan_expires_at, onboarded_at, notifications_enabled")
-      .eq("id", user.id)
-      .maybeSingle(),
-    supabase.from("user_preferences").select("*").eq("user_id", user.id).maybeSingle(),
-    supabase.from("consents").select("adult, respectful, terms_version, accepted_at").eq("user_id", user.id).order("accepted_at", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("follows").select("following_id").eq("follower_id", user.id),
-    supabase.from("follows").select("*", { count: "exact", head: true }).eq("following_id", user.id),
-    supabase.from("connections").select("requester_id, addressee_id, status").or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`),
-    supabase.from("blocks").select("blocked_id").eq("blocker_id", user.id),
-    supabase.from("mutes").select("muted_id").eq("user_id", user.id),
-    supabase.from("wishlist_items").select("id, kind, title, note, created_at, wishlist_shares(shared_with)").eq("user_id", user.id).order("created_at", { ascending: false }),
-    supabase.from("plans_future").select("id, wish_id, title, meet_at, place, plan_invites(invitee_id)").eq("user_id", user.id).order("meet_at"),
-    supabase.from("user_avatar_inventory").select("category, item_id").eq("user_id", user.id),
-    supabase.from("streak_events").select("type, at").eq("user_id", user.id).gte("at", streakSince).order("at"),
-  ]);
-
-  const failed = [profileRes, prefRes, consentRes, followRes, followerRes, connRes, blockRes, muteRes, wishRes, planRes, inventoryRes, streakRes].find((r) => r.error);
-  if (failed?.error) return { account: null, error: failed.error.message };
-  if (!profileRes.data) return { account: null, error: "Profile was not created. Check the signup trigger in the migration." };
-
-  const consent = consentRes.data
-    ? {
-        adult: consentRes.data.adult,
-        respectful: consentRes.data.respectful,
-        termsVersion: consentRes.data.terms_version,
-        acceptedAt: consentRes.data.accepted_at,
-      }
-    : null;
-
-  return {
-    account: accountFromRows({
-      email: user.email ?? "",
-      profile: profileRes.data,
-      preferences: prefRes.data,
-      consent,
-      following: (followRes.data ?? []).map((r) => r.following_id),
-      followers: followerRes.count ?? 0,
-      connections: connRes.data ?? [],
-      blocked: (blockRes.data ?? []).map((r) => r.blocked_id),
-      muted: (muteRes.data ?? []).map((r) => r.muted_id),
-      wishes: wishRes.data ?? [],
-      plans: planRes.data ?? [],
-      inventory: inventoryRes.data ?? [],
-      streakEvents: (streakRes.data ?? []) as StreakEvent[],
-    }),
-  };
+  return loadAccount(supabase);
 }
 
 export async function loadPlans(): Promise<Plan[] | null> {
@@ -104,25 +50,7 @@ export async function saveOnboarding(raw: unknown): Promise<Result> {
   const { supabase, userId } = await client();
   if (!supabase) return { ok: true };
   if (!userId) return { ok: false, error: "Not signed in" };
-  const parsed = onboardingSchema.safeParse(raw);
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Check your answers" };
-
-  const pref = await supabase.from("user_preferences").upsert(preferencesRow(userId, parsed.data));
-  if (pref.error) return { ok: false, error: pref.error.message };
-
-  // Consents are append-only (insert grant, no update), so an existing row for this terms version is kept as-is.
-  const consent = await supabase.from("consents").upsert(
-    { user_id: userId, adult: true, respectful: true, terms_version: TERMS_VERSION },
-    { onConflict: "user_id,terms_version", ignoreDuplicates: true },
-  );
-  if (consent.error) return { ok: false, error: consent.error.message };
-
-  const profile = await supabase.from("profiles").update(publicProfilePatch(parsed.data)).eq("id", userId);
-  if (profile.error) return { ok: false, error: profile.error.message };
-
-  const done = await supabase.rpc("complete_onboarding");
-  if (done.error) return { ok: false, error: done.error.message };
-  return { ok: true };
+  return saveAccount(supabase, userId, raw);
 }
 
 /** The database checks that every layer is free, bought, or unlocked before saving. */

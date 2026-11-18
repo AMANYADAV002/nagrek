@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BadgeCheck, Gift, MapPin, Music2, Plus, Star } from "lucide-react";
 import { toast } from "sonner";
 import { Chip } from "@/components/glass/chip";
@@ -10,23 +10,34 @@ import { PageHeader } from "@/components/glass/section-heading";
 import { EmptyState } from "@/components/glass/states";
 import { Stagger, StaggerItem } from "@/components/motion/stagger";
 import type { AmbientSynth } from "@/lib/audio/synth";
+import { PlaceMap } from "@/components/explore/place-map";
+import { cities as cityCenters } from "@/lib/data/cities";
 import { cravingEmoji } from "@/lib/data/cravings";
+import type { MapPoint, MapView } from "@/lib/map/overlay";
 import { uid } from "@/lib/format";
 import { addWish } from "@/lib/actions/account";
 import { backendEnabled } from "@/lib/supabase/env";
 import { places } from "@/lib/mock/places";
+import { useDraft } from "@/lib/draft";
 import { updateSession, useSession } from "@/lib/mock/session";
 
 /** Curated seed list. TODO(phase-6): `places` table; Google Places integration later. */
 export function ExploreView() {
   const session = useSession();
   const myCity = session?.preferences?.location.city;
-  const [city, setCity] = useState<string>("all");
-  const [cuisine, setCuisine] = useState<string>("all");
+  const [city, setCity] = useDraft("explore-city", "all");
+  const [cuisine, setCuisine] = useDraft("explore-cuisine", "all");
+  const [applied, setApplied] = useState({ city: "all", cuisine: "all" });
   const [ambient, setAmbient] = useState(false);
   const synth = useRef<AmbientSynth | null>(null);
 
   useEffect(() => () => synth.current?.close(), []);
+
+  // Chips update immediately. The list follows a moment later so a fast tap doesn't rebuild it twice.
+  useEffect(() => {
+    const t = setTimeout(() => setApplied({ city, cuisine }), 200);
+    return () => clearTimeout(t);
+  }, [city, cuisine]);
 
   async function toggleAmbient() {
     if (ambient) {
@@ -46,7 +57,24 @@ export function ExploreView() {
   const cities = [...new Set(places.map((p) => p.city))];
   const cuisines = [...new Set(places.map((p) => p.cuisine))];
   const effectiveCity = city === "all" && myCity && cities.includes(myCity) ? myCity : city;
-  const list = places.filter((p) => (effectiveCity === "all" || p.city === effectiveCity) && (cuisine === "all" || p.cuisine === cuisine));
+  const listCity = applied.city === "all" && myCity && cities.includes(myCity) ? myCity : applied.city;
+  const list = useMemo(
+    () => places.filter((p) => (listCity === "all" || p.city === listCity) && (applied.cuisine === "all" || p.cuisine === applied.cuisine)),
+    [listCity, applied.cuisine],
+  );
+  const mapView = useMemo<MapView>(() => {
+    if (effectiveCity !== "all") {
+      const city = cityCenters.find((item) => item.name === effectiveCity);
+      if (city) return { lng: city.point.lng, lat: city.point.lat, zoom: 11 };
+    }
+    return { lng: 79.5, lat: 22.5, zoom: 4 };
+  }, [effectiveCity]);
+  const mapPins = useMemo<MapPoint[]>(() => {
+    const names = new Set(list.map((place) => place.city));
+    return cityCenters.flatMap((city) =>
+      names.has(city.name) ? [{ id: city.name, name: city.name, lat: city.point.lat, lng: city.point.lng, kind: "city" as const }] : [],
+    );
+  }, [list]);
 
   return (
     <div className="space-y-6">
@@ -79,6 +107,9 @@ export function ExploreView() {
           ))}
         </div>
       </div>
+
+      <PlaceMap view={mapView} points={mapPins} />
+      <p className="text-xs text-soft">Pins mark city centres from Nagrek’s city list. The cards below are the curated places.</p>
 
       {list.length === 0 ? (
         <EmptyState icon={<MapPin className="size-8" />} title="No places match" description="Try another city or cuisine." />

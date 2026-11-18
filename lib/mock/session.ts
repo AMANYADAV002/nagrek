@@ -80,6 +80,7 @@ export interface SessionState {
 }
 
 const STORAGE_KEY = "nagrek.session.v1";
+const CACHE_KEY = "nagrek.session.cache.v1";
 
 /** Seeds a streak ending yesterday, so it is valid at any time of day and today's meeting extends it. */
 function seedStreakEvents(days: number): StreakEvent[] {
@@ -135,13 +136,43 @@ export function initialSession(): SessionState {
   };
 }
 
+/** A signed-in profile snapshot. Auth tokens stay in the Supabase cookie, not in this cache. */
+export function parseCachedSession(raw: string): SessionState | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { v?: number; state?: Partial<SessionState> };
+    if (parsed.v !== 1 || !parsed.state || typeof parsed.state !== "object") return null;
+    return { ...blankSession(), ...parsed.state };
+  } catch {
+    return null;
+  }
+}
+
 let state: SessionState | null = null;
 let hydrated = false;
+let epoch = 0;
 const listeners = new Set<() => void>();
 
+/** Bumps on every session change, so an older account fetch cannot overwrite a newer login. */
+export function sessionEpoch() {
+  return epoch;
+}
+
 function load(): SessionState | null {
-  // Real accounts are loaded by AccountSync. Until then, render the loading guard.
-  if (backendEnabled()) return hydrated ? state : null;
+  // Real accounts are loaded by AccountSync. A local snapshot paints first so reload and Back
+  // do not blank the profile while that request is in flight.
+  if (backendEnabled()) {
+    if (state) return state;
+    if (!hydrated && typeof window !== "undefined") {
+      const cached = parseCachedSession(localStorage.getItem(CACHE_KEY) ?? "");
+      if (cached) {
+        state = cached;
+        hydrated = true;
+        return state;
+      }
+    }
+    return hydrated ? state : null;
+  }
   if (state) return state;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -153,8 +184,12 @@ function load(): SessionState | null {
 }
 
 function persist() {
-  if (backendEnabled() || !state) return;
+  if (!state || typeof window === "undefined") return;
   try {
+    if (backendEnabled()) {
+      window.localStorage.setItem(CACHE_KEY, JSON.stringify({ v: 1, state }));
+      return;
+    }
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
     // Storage full or disabled: the session still works for this tab.
@@ -164,6 +199,7 @@ function persist() {
 function emit(next: SessionState) {
   state = next;
   hydrated = true;
+  epoch += 1;
   persist();
   listeners.forEach((l) => l());
 }
@@ -178,6 +214,10 @@ export function updateSession(updater: Partial<SessionState> | ((s: SessionState
 /** Replace the in-memory session with the account loaded from Supabase. */
 export function hydrateSession(next: SessionState) {
   emit(next);
+}
+
+export function peekSession() {
+  return state;
 }
 
 export function resetSession() {
@@ -195,5 +235,5 @@ export function useSession(): SessionState | null {
 }
 
 export function snapshotOf(s: SessionState): SessionSnapshot {
-  return { signedIn: !!s.user, onboarded: !!s.preferences && !!s.consent?.adult, plan: s.plan };
+  return { signedIn: !!s.user, onboarded: s.welcomed || (!!s.preferences && !!s.consent?.adult), plan: s.plan };
 }

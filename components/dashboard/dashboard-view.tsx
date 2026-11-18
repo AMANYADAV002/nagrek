@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
@@ -9,11 +9,15 @@ import { toast } from "sonner";
 import { LayeredAvatar } from "@/components/avatar/layered-avatar";
 import { Chip } from "@/components/glass/chip";
 import { GlassCard } from "@/components/glass/glass-card";
-import { GradientButton } from "@/components/glass/gradient-button";
+import { GradientButton, GradientLink } from "@/components/glass/gradient-button";
 import { Eyebrow } from "@/components/glass/section-heading";
 import { StoriesRow } from "@/components/stories/stories-row";
+import { CravingInviteBanner } from "@/components/history/craving-invite-banner";
 import { acceptJoinAndGo } from "@/components/notifications/notification-bell";
 import { useNotifications } from "@/components/notifications/notifications-provider";
+import { MatchDeck } from "@/components/matching/match-deck";
+import { SectionBoundary } from "@/components/section-boundary";
+import { clearMatchQueue, matchQueueSnapshot, parseMatchQueue, saveMatchQueue, subscribeMatchQueue, type DeckCard } from "@/lib/matching/deck-queue";
 import { cancelCraving, getMatchQuota, postCraving, proposeMatch, type Quota } from "@/lib/actions/matching";
 import { getPlan } from "@/lib/config/plans";
 import { cravingEmoji, cuisineChips } from "@/lib/data/cravings";
@@ -22,34 +26,73 @@ import { toneLabel, uid } from "@/lib/format";
 import {
   findLiveMatches, joinPingCandidates, LOW_TRAFFIC_THRESHOLD, REQUEST_TTL_MS,
 } from "@/lib/matching/live";
+import { useDraft } from "@/lib/draft";
 import { useSession } from "@/lib/mock/session";
 import { getMockUser } from "@/lib/mock/users";
+import { useLocalWeather } from "@/components/streak/use-local-weather";
+import { WeatherBackdrop } from "@/components/streak/weather-backdrop";
 import { calculateStreak } from "@/lib/streak/calc";
 import { backendEnabled } from "@/lib/supabase/env";
 import type { MockUser } from "@/lib/types";
 
 type LiveMatch = { user: MockUser; score: number; distanceKm?: number; requestId?: string };
 
+function ExpiryClock({ deadline, onExpire }: { deadline: number; onExpire: () => void }) {
+  const [now, setNow] = useState(() => Date.now());
+  const onExpireRef = useRef(onExpire);
+  useEffect(() => {
+    onExpireRef.current = onExpire;
+  }, [onExpire]);
+  useEffect(() => {
+    let fired = false;
+    const t = setInterval(() => {
+      const n = Date.now();
+      setNow(n);
+      if (!fired && n >= deadline) {
+        fired = true;
+        onExpireRef.current();
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [deadline]);
+  const remaining = Math.max(0, deadline - now);
+  const mm = String(Math.floor(remaining / 60000)).padStart(2, "0");
+  const ss = String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0");
+  return (
+    <span className="flex items-center gap-1.5">
+      <Clock className="size-3.5 text-peach" aria-hidden /> Request expires in {mm}:{ss}
+    </span>
+  );
+}
+
+function matchNote(via: "craving" | "saved" | "category" | null, food: string): string | null {
+  if (via === "saved") return `Nobody is craving ${food} right now. These people saved it, and the match still follows your diet.`;
+  if (via === "category") return `No exact dish matched, so this is the same kind of food as ${food}. Veg, non-veg, halal and jain stay separate.`;
+  return null;
+}
+
 type Phase =
   | { kind: "idle" }
   | { kind: "searching" }
-  | { kind: "live"; matches: LiveMatch[]; expiresAt: number }
-  | { kind: "pinged"; pinged: MockUser[]; count: number; matches: LiveMatch[]; expiresAt: number; acceptedBy?: MockUser };
+  | { kind: "live"; matches: LiveMatch[]; expiresAt: number; note: string | null }
+  | { kind: "pinged"; pinged: MockUser[]; count: number; matches: LiveMatch[]; expiresAt: number; acceptedBy?: MockUser; note: string | null };
 
 export function DashboardView() {
   const router = useRouter();
   const session = useSession();
   const live = backendEnabled();
   const { notes, markRead } = useNotifications();
-  const [craving, setCraving] = useState<string>("");
+  const [craving, setCraving] = useDraft("dashboard-craving", "");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [incoming, setIncoming] = useState<{ user: MockUser; food: string } | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const [matchesToday, setMatchesToday] = useState(1);
   const [quota, setQuota] = useState<Quota | null>(null);
   const [busy, setBusy] = useState(false);
+  const [kycLocked, setKycLocked] = useState(false);
+  const [deckStart, setDeckStart] = useState(0);
 
   const prefs = session?.preferences;
+  const weather = useLocalWeather(prefs?.location.city, prefs?.location.point?.lat, prefs?.location.point?.lng);
   const plan = getPlan(session?.plan);
   const limit: number | "unlimited" = live
     ? quota
@@ -61,11 +104,35 @@ export function DashboardView() {
 
   // Live: someone nearby pinged me, or my request was accepted / matched.
   const joinPing = live ? notes.find((n) => n.kind === "join_request" && !n.read_at) : undefined;
-  const ready = live ? notes.find((n) => (n.kind === "join_accepted" || n.kind === "match") && !n.read_at) : undefined;
+  const ready = live ? notes.find((n) => (n.kind === "join_accepted" || n.kind === "match" || n.kind === "match_accepted") && !n.read_at) : undefined;
 
   useEffect(() => {
     if (live) void getMatchQuota().then(setQuota);
   }, [live]);
+
+  useEffect(() => {
+    if (!live) return;
+    fetch("/api/kyc/status")
+      .then(async (res) => {
+        if (!res.ok) return;
+        const json = (await res.json()) as { required?: boolean; status?: string };
+        setKycLocked(Boolean(json.required) && json.status !== "verified");
+      })
+      .catch(() => {});
+  }, [live]);
+
+  const queueRaw = useSyncExternalStore(subscribeMatchQueue, matchQueueSnapshot, () => "");
+  const [queueSeen, setQueueSeen] = useState("");
+  if (queueRaw !== queueSeen) {
+    setQueueSeen(queueRaw);
+    const saved = parseMatchQueue(queueRaw);
+    if (saved) {
+      setCraving(saved.food);
+      setDeckStart(saved.index);
+      if (saved.kind === "live") setPhase({ kind: "live", matches: saved.cards, expiresAt: saved.expiresAt, note: saved.note });
+      else setPhase({ kind: "pinged", pinged: [], count: saved.pinged, matches: saved.cards, expiresAt: saved.expiresAt, note: saved.note });
+    }
+  }
 
   // Demo only: a simulated incoming "request to join" ping. Live pings arrive as notifications.
   useEffect(() => {
@@ -78,30 +145,26 @@ export function DashboardView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.notificationsEnabled]);
 
-  // Countdown tick for active requests; expires them after REQUEST_TTL_MS.
-  useEffect(() => {
-    if (phase.kind !== "live" && phase.kind !== "pinged") return;
-    const deadline = phase.expiresAt;
-    const t = setInterval(() => {
-      const n = Date.now();
-      setNow(n);
-      if (n >= deadline) {
-        setPhase({ kind: "idle" });
-        toast.message("Your request expired. Post a new craving anytime.");
-      }
-    }, 1000);
-    return () => clearInterval(t);
-  }, [phase]);
+  const alive = useRef(true);
+  useEffect(() => () => {
+    alive.current = false;
+  }, []);
 
-  const expiresAt = phase.kind === "live" || phase.kind === "pinged" ? phase.expiresAt : 0;
-  const remaining = Math.max(0, expiresAt - now);
+  const expireRequest = useCallback(() => {
+    clearMatchQueue();
+    setPhase({ kind: "idle" });
+    toast.message("Your request expired. Post a new craving anytime.");
+  }, []);
 
   if (!session || !prefs) return null;
   const myPrefs = prefs;
 
   async function search() {
+    if (kycLocked) return toast.error("Verify your identity before matching.");
     if (!craving) return toast.error("Pick what you are craving first.");
     if (limit !== "unlimited" && used >= limit) return toast.error(`You have used all ${limit} matches today. Upgrade for more.`);
+    clearMatchQueue();
+    setDeckStart(0);
     setPhase({ kind: "searching" });
 
     if (live) {
@@ -111,46 +174,66 @@ export function DashboardView() {
         return toast.error(res.error);
       }
       setQuota(res.quota);
-      setNow(Date.now());
       const expiresAt = new Date(res.expiresAt).getTime();
       const matches = res.matches.map((c) => ({ user: c.person, score: c.score, distanceKm: c.distanceKm, requestId: c.requestId }));
       track("craving", { food: craving, live: matches.length, pinged: res.pinged });
-      if (matches.length >= LOW_TRAFFIC_THRESHOLD) setPhase({ kind: "live", matches, expiresAt });
-      else setPhase({ kind: "pinged", pinged: [], count: res.pinged, matches, expiresAt });
+      const note = matchNote(res.via, craving);
+      if (matches.length >= LOW_TRAFFIC_THRESHOLD) setPhase({ kind: "live", matches, expiresAt, note });
+      else setPhase({ kind: "pinged", pinged: [], count: res.pinged, matches, expiresAt, note });
       return;
     }
 
     await new Promise((r) => setTimeout(r, 2200));
     const found = findLiveMatches(myPrefs, craving, excluded);
     const expires = Date.now() + REQUEST_TTL_MS;
-    setNow(Date.now());
     if (found.length >= LOW_TRAFFIC_THRESHOLD) {
-      setPhase({ kind: "live", matches: found, expiresAt: expires });
+      setPhase({ kind: "live", matches: found, expiresAt: expires, note: null });
       return;
     }
     const pinged = joinPingCandidates(myPrefs, craving, excluded);
     const pool = pinged.length ? pinged : found.map((l) => l.user);
-    setPhase({ kind: "pinged", pinged: pool, count: pool.length, matches: [], expiresAt: expires });
+    setPhase({ kind: "pinged", pinged: pool, count: pool.length, matches: [], expiresAt: expires, note: null });
     if (pool.length) {
       setTimeout(() => {
+        if (!alive.current) return;
         setPhase((p) => (p.kind === "pinged" ? { ...p, acceptedBy: pool[0] } : p));
         toast.success(`${pool[0].name.split(" ")[0]} wants to join you for ${craving}!`);
       }, 3500);
     }
   }
 
-  async function startMatch(user: MockUser, food: string, requestId?: string) {
+  async function startMatch(user: MockUser, food: string, requestId?: string): Promise<{ ok: true; status: "pending" } | { ok: false; error: string }> {
     track("match", { food, with: user.id });
     if (live && requestId) {
       setBusy(true);
       const res = await proposeMatch(requestId);
       setBusy(false);
-      if (!res.ok) return toast.error(res.error);
+      if (!res.ok) {
+        toast.error(res.error);
+        return res;
+      }
+      clearMatchQueue();
       router.push(`/match/${res.matchId}/pre`);
-      return;
+      return { ok: true, status: "pending" };
     }
     setMatchesToday((n) => n + 1);
+    clearMatchQueue();
     router.push(`/match/${uid("m")}/pre?with=${user.id}&food=${encodeURIComponent(food)}`);
+    return { ok: true, status: "pending" };
+  }
+
+  function openProfile(card: DeckCard, index: number) {
+    if (phase.kind !== "live" && phase.kind !== "pinged") return;
+    saveMatchQueue({
+      index,
+      food: craving,
+      cards: phase.matches,
+      expiresAt: phase.expiresAt,
+      note: phase.note,
+      kind: phase.kind,
+      pinged: phase.kind === "pinged" ? phase.count : 0,
+    });
+    router.push(`/profile/${card.user.id}?from=match`);
   }
 
   function openReady() {
@@ -160,17 +243,17 @@ export function DashboardView() {
   }
 
   function cancelRequest() {
+    clearMatchQueue();
     setPhase({ kind: "idle" });
     if (live) void cancelCraving();
   }
 
   const streak = calculateStreak(session.streakEvents);
   const chips = [...new Set([...myPrefs.foodInterests, ...cuisineChips])].slice(0, 14);
-  const mm = String(Math.floor(remaining / 60000)).padStart(2, "0");
-  const ss = String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0");
 
   return (
     <div className="space-y-6">
+      <CravingInviteBanner />
       <AnimatePresence>
         {(joinPing || ready) && (
           <motion.div
@@ -188,7 +271,7 @@ export function DashboardView() {
             {ready ? (
               <>
                 <p className="min-w-0 flex-1 text-sm font-semibold">
-                  {ready.kind === "join_accepted" ? "Someone accepted your" : "Someone matched with your"} {ready.payload.food}{" "}
+                  {ready.kind === "match" ? "Someone matched with your" : "Someone accepted your"} {ready.payload.food}{" "}
                   {cravingEmoji[ready.payload.food ?? ""] ?? ""} request!
                 </p>
                 <GradientButton size="sm" onClick={openReady}>Open match</GradientButton>
@@ -264,7 +347,7 @@ export function DashboardView() {
         <StoriesRow />
       </GlassCard>
 
-      <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+      <div className={(phase.kind === "live" || phase.kind === "pinged") && phase.matches.length > 0 ? "grid gap-6" : "grid gap-6 lg:grid-cols-[1.6fr_1fr]"}>
         <GlassCard strong className="relative overflow-hidden p-6 md:p-8">
           <div aria-hidden className="absolute -top-28 -right-28 size-80 rounded-full bg-[radial-gradient(ellipse,#ff7e5f2e,transparent_70%)]" />
           <Eyebrow>Hi {session.user?.name.split(" ")[0]}</Eyebrow>
@@ -279,7 +362,13 @@ export function DashboardView() {
             </span>
           </p>
 
-          <AnimatePresence mode="wait">
+          {kycLocked ? (
+            <div className="relative mt-6 space-y-4">
+              <p className="text-sm text-soft">Verify your identity before you post a craving. DigiLocker checks that you are 18 or older.</p>
+              <GradientLink href="/verify-kyc" size="lg">Verify Identity with DigiLocker</GradientLink>
+            </div>
+          ) : null}
+          {!kycLocked && <AnimatePresence mode="wait">
             {phase.kind === "idle" && (
               <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="relative mt-6 space-y-6">
                 <div className="flex flex-wrap gap-2">
@@ -314,41 +403,37 @@ export function DashboardView() {
 
             {(phase.kind === "live" || phase.kind === "pinged") && (
               <motion.div key="results" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="relative mt-6 space-y-4">
+                {phase.note && <p className="text-sm text-soft">{phase.note}</p>}
                 <div className="flex items-center justify-between text-xs text-soft">
-                  <span className="flex items-center gap-1.5"><Clock className="size-3.5 text-peach" aria-hidden /> Request expires in {mm}:{ss}</span>
+                  <ExpiryClock deadline={phase.expiresAt} onExpire={expireRequest} />
                   <button type="button" className="flex items-center gap-1 hover:text-cream" onClick={cancelRequest}>
                     <X className="size-3.5" aria-hidden /> Cancel request
                   </button>
                 </div>
 
-                {(phase.kind === "live" ? phase.matches : phase.matches).map(({ user, score, distanceKm, requestId }, i) => (
-                    <motion.div
-                      key={user.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.1 }}
-                      className="flex items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3"
-                    >
-                      <Link href={`/profile/${user.id}`} className="size-12 shrink-0 overflow-hidden rounded-full">
-                        <LayeredAvatar config={user.avatar} title={user.name} />
-                      </Link>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-semibold">{user.name}</p>
-                        <p className="text-xs text-soft">
-                          {user.area} · {distanceKm !== undefined ? `~${Math.max(1, Math.round(distanceKm))} km` : user.city} · ★ {user.trustScore}
-                        </p>
-                      </div>
-                      <span className="hidden rounded-full bg-peach/15 px-2.5 py-1 text-xs font-bold text-peach sm:inline">{score}% match</span>
-                      <GradientButton size="sm" disabled={busy} onClick={() => startMatch(user, craving, requestId)}>Match</GradientButton>
-                    </motion.div>
-                  ))}
+                {phase.matches.length > 0 && (
+                  <SectionBoundary>
+                  <MatchDeck
+                    key={phase.expiresAt}
+                    cards={phase.matches}
+                    food={craving}
+                    initialIndex={deckStart}
+                    onAccept={(card) => startMatch(card.user, craving, card.requestId)}
+                    onOpenProfile={openProfile}
+                    onDone={() => {
+                      clearMatchQueue();
+                      setPhase({ kind: "idle" });
+                    }}
+                  />
+                  </SectionBoundary>
+                )}
 
                 {phase.kind === "pinged" && (
                   <div className="space-y-4">
                     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm">
                       <p className="flex items-center gap-2 font-semibold"><Send className="size-4 text-peach" aria-hidden /> It is quiet right now</p>
                       <p className="mt-1 text-soft">
-                        We sent &quot;Someone nearby wants {craving}. Want to join?&quot; to {phase.count} {phase.count === 1 ? "person" : "people"} who saved {craving} as a favourite.
+                        We asked {phase.count} {phase.count === 1 ? "person" : "people"} who fit this craving and your diet if they want to join.
                         Pings respect their notification settings and daily limits.
                       </p>
                     </div>
@@ -372,19 +457,21 @@ export function DashboardView() {
                 )}
               </motion.div>
             )}
-          </AnimatePresence>
+          </AnimatePresence>}
         </GlassCard>
 
         <div className="space-y-6">
-          <Link href="/streak" className="block">
-            <GlassCard className="flex items-center gap-4 p-5 transition-colors hover:bg-white/[0.06]">
+          <Link href="/streak" className="relative block overflow-hidden rounded-2xl border border-white/15" aria-label={`${streak}-day streak, ${weather.place}, ${weather.label}`}>
+            <WeatherBackdrop scene={weather.scene} />
+            <div className="relative z-10 flex items-center gap-4 bg-ink/55 p-5 text-cream backdrop-blur-md transition-colors hover:bg-ink/45">
               <span className="text-4xl animate-flicker" aria-hidden>🔥</span>
               <div className="flex-1">
                 <p className="font-heading text-2xl">{streak}-day streak</p>
-                <p className="text-xs text-soft">Keep meeting to unlock sponsor rewards</p>
+                <p className="text-xs text-cream/75">Keep meeting to unlock sponsor rewards</p>
+                <p className="text-[11px] text-cream/70">{weather.place} · {weather.label}</p>
               </div>
               <Flame className="size-5 text-peach" aria-hidden />
-            </GlassCard>
+            </div>
           </Link>
           <GlassCard className="space-y-3 p-5">
             <p className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-peach" aria-hidden /> Quick links</p>

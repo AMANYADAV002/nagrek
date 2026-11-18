@@ -4,9 +4,12 @@ import { z } from "zod";
 import {
   LOW_TRAFFIC_THRESHOLD, MAX_JOIN_PINGS_PER_REQUEST, MAX_JOIN_PINGS_PER_USER_PER_DAY, MATCH_DECISION_MS, REQUEST_TTL_MS,
 } from "@/lib/matching/live";
+import { dietCompatible, FOOD_TIER_ORDER, foodLevel, type FoodTier } from "@/lib/matching/food";
 import { matchingScore, toneCompatible, type MatchProfile } from "@/lib/matching/score";
 import { blockedEitherWay, loadPeople, loadPerson, type Person } from "@/lib/people";
+import { connectMatchedPair } from "@/lib/server/relationship";
 import { getCaller, getMember, startOfIndianDay, type Fail } from "@/lib/server/caller";
+import { kycEnforced } from "@/lib/kyc/mode";
 import { rateLimited, SLOW_DOWN } from "@/lib/server/rate-limit";
 import type { Dietary, Tone } from "@/lib/types";
 
@@ -24,7 +27,7 @@ export interface Candidate {
 }
 
 export type CravingResult =
-  | { ok: true; requestId: string; expiresAt: string; matches: Candidate[]; pinged: number; quota: Quota }
+  | { ok: true; requestId: string; expiresAt: string; matches: Candidate[]; pinged: number; quota: Quota; via: FoodTier | null }
   | Fail;
 
 export type MatchStatus = "pending" | "live" | "ended" | "skipped";
@@ -95,6 +98,10 @@ export async function postCraving(rawFood: string): Promise<CravingResult> {
   if ("error" in m) return m;
   const { admin, userId } = m;
   if (rateLimited(`craving:${userId}`, 6, 60_000)) return SLOW_DOWN;
+  if (kycEnforced()) {
+    const { data: kyc } = await admin.from("kyc_verifications").select("status").eq("user_id", userId).maybeSingle();
+    if (kyc?.status !== "verified") return { ok: false, error: "Verify your identity before matching." };
+  }
 
   const quota = await quotaFor(admin, userId, m.plan);
   if (quota.limit !== null && quota.used >= quota.limit) {
@@ -124,26 +131,28 @@ export async function postCraving(rawFood: string): Promise<CravingResult> {
   const blocked = await blockedEitherWay(userId);
   const { data: open } = await admin
     .from("match_requests")
-    .select("id, user_id, tone, lat, lng")
+    .select("id, user_id, food, tone, lat, lng")
     .eq("status", "open")
     .gt("expires_at", new Date().toISOString())
-    .ilike("food", food.data)
     .neq("user_id", userId)
     .order("created_at", { ascending: false })
-    .limit(100);
+    .limit(150);
 
-  const latest = new Map<string, { id: string; user_id: string; tone: Tone; lat: number | null; lng: number | null }>();
+  const latest = new Map<string, { id: string; user_id: string; food: string; tone: Tone; lat: number | null; lng: number | null }>();
   for (const r of open ?? []) if (!blocked.has(r.user_id) && !latest.has(r.user_id)) latest.set(r.user_id, r);
 
-  const scored: { requestId: string; userId: string; score: number; distanceKm?: number }[] = [];
+  const scored: { tier: FoodTier; requestId: string; userId: string; score: number; distanceKm?: number }[] = [];
   if (latest.size) {
     const { data: prefs } = await admin.from("user_preferences").select(PREF_COLUMNS).in("user_id", [...latest.keys()]);
     const mine = toMatchProfile(me);
     for (const p of (prefs ?? []) as PrefRow[]) {
       const r = latest.get(p.user_id)!;
-      const result = matchingScore(mine, toMatchProfile(p, { food: food.data, tone: r.tone, lat: r.lat, lng: r.lng }), { craving: food.data });
+      const tier = foodLevel(food.data, me.food_interests, r.food, p.food_interests);
+      if (!tier || !dietCompatible(me.dietary, p.dietary)) continue;
+      const result = matchingScore(mine, toMatchProfile(p, { food: r.food, tone: r.tone, lat: r.lat, lng: r.lng }), { craving: food.data, tier });
       if (!result.compatible) continue;
       scored.push({
+        tier,
         requestId: r.id,
         userId: p.user_id,
         score: result.score,
@@ -151,22 +160,24 @@ export async function postCraving(rawFood: string): Promise<CravingResult> {
       });
     }
   }
-  scored.sort((a, b) => b.score - a.score);
-  const top = scored.slice(0, 10);
+  const offline = await peopleByFoodTier({ admin, userId, me, food: food.data, skip: blocked });
+  const tier = FOOD_TIER_ORDER.find((t) => scored.some((s) => s.tier === t) || offline.some((s) => s.tier === t));
+  const top = (tier ? scored.filter((s) => s.tier === tier) : []).sort((a, b) => b.score - a.score).slice(0, 10);
   const people = new Map((await loadPeople(top.map((s) => s.userId))).map((p) => [p.id, p]));
   const matches: Candidate[] = top
     .filter((s) => people.has(s.userId))
     .map((s) => ({ requestId: s.requestId, person: people.get(s.userId)!, score: s.score, distanceKm: s.distanceKm }));
 
   let pinged = 0;
-  if (matches.length < LOW_TRAFFIC_THRESHOLD) {
-    pinged = await pingSavedFans({
+  if (tier && matches.length < LOW_TRAFFIC_THRESHOLD) {
+    const shown = new Set(matches.map((x) => x.person.id));
+    pinged = await pingUsers({
       admin,
-      userId,
-      me,
-      food: food.data,
       requestId: request.id,
-      skip: new Set([...blocked, ...matches.map((x) => x.person.id)]),
+      food: food.data,
+      area: me.area ?? me.city,
+      tone: me.tone,
+      userIds: offline.filter((s) => s.tier === tier && !shown.has(s.id)).map((s) => s.id),
     });
   }
 
@@ -176,52 +187,68 @@ export async function postCraving(rawFood: string): Promise<CravingResult> {
     expiresAt: request.expires_at,
     matches,
     pinged,
+    via: tier ?? null,
     quota: { ...quota, used: quota.used + 1 },
   };
 }
 
-/** Low-traffic rule: ping people who saved this food, in the same city, with a compatible tone. */
-async function pingSavedFans(input: {
+/** People in the same city, tagged with the food tier their saved list reaches. Diet and tone already applied. */
+async function peopleByFoodTier(input: {
   admin: NonNullable<Awaited<ReturnType<typeof getCaller>>>["admin"];
   userId: string;
   me: PrefRow;
   food: string;
-  requestId: string;
   skip: Set<string>;
-}): Promise<number> {
-  const { admin, userId, me, food, requestId, skip } = input;
+}): Promise<{ tier: FoodTier; id: string }[]> {
+  const { admin, userId, me, food, skip } = input;
+  const { data: prefs } = await admin
+    .from("user_preferences")
+    .select("user_id, food_interests, tone, dietary")
+    .ilike("city", me.city)
+    .neq("user_id", userId)
+    .limit(80);
+  const tagged = ((prefs ?? []) as Pick<PrefRow, "user_id" | "food_interests" | "tone" | "dietary">[]).flatMap((p) => {
+    if (skip.has(p.user_id) || !dietCompatible(me.dietary, p.dietary) || !toneCompatible(me.tone, p.tone)) return [];
+    const tier = foodLevel(food, me.food_interests, null, p.food_interests);
+    if (!tier || tier === "craving") return [];
+    return [{ tier, id: p.user_id }];
+  });
+  if (!tagged.length) return [];
+
   const { data: fans } = await admin
     .from("profiles")
-    .select("id, tone")
-    .contains("food_interests", [food])
-    .ilike("city", me.city)
+    .select("id")
+    .in("id", tagged.map((r) => r.id))
     .eq("notifications_enabled", true)
     .eq("suspended", false)
     .not("onboarded_at", "is", null)
-    .gt("plan_expires_at", new Date().toISOString())
-    .neq("id", userId)
-    .limit(50);
+    .gt("plan_expires_at", new Date().toISOString());
+  const allowed = new Set((fans ?? []).map((f) => f.id));
+  return tagged.filter((r) => allowed.has(r.id));
+}
 
-  const eligible = (fans ?? []).filter((f) => !skip.has(f.id) && toneCompatible(me.tone, (f.tone ?? "random") as Tone));
-  if (!eligible.length) return 0;
-
+async function pingUsers(input: {
+  admin: NonNullable<Awaited<ReturnType<typeof getCaller>>>["admin"];
+  requestId: string;
+  food: string;
+  area: string;
+  tone: Tone;
+  userIds: string[];
+}): Promise<number> {
+  const { admin, requestId, food, area, tone, userIds } = input;
+  if (!userIds.length) return 0;
   const { data: today } = await admin
     .from("notifications")
     .select("user_id")
     .eq("kind", "join_request")
     .gte("created_at", startOfIndianDay())
-    .in("user_id", eligible.map((f) => f.id));
+    .in("user_id", userIds);
   const sent = new Map<string, number>();
   for (const n of today ?? []) sent.set(n.user_id, (sent.get(n.user_id) ?? 0) + 1);
-
-  const targets = eligible.filter((f) => (sent.get(f.id) ?? 0) < MAX_JOIN_PINGS_PER_USER_PER_DAY).slice(0, MAX_JOIN_PINGS_PER_REQUEST);
+  const targets = userIds.filter((id) => (sent.get(id) ?? 0) < MAX_JOIN_PINGS_PER_USER_PER_DAY).slice(0, MAX_JOIN_PINGS_PER_REQUEST);
   if (!targets.length) return 0;
   const { error } = await admin.from("notifications").insert(
-    targets.map((t) => ({
-      user_id: t.id,
-      kind: "join_request",
-      payload: { requestId, food, area: me.area ?? me.city, tone: me.tone },
-    })),
+    targets.map((id) => ({ user_id: id, kind: "join_request", payload: { requestId, food, area, tone } })),
   );
   return error ? 0 : targets.length;
 }
@@ -369,13 +396,21 @@ export async function respondMatch(matchId: string, decision: "accepted" | "skip
   if (!caller) return { ok: false, error: "Sign in to continue" };
   const { admin, userId } = caller;
 
-  const { data: match } = await admin.from("matches").select("user_a, user_b, status, decide_by").eq("id", matchId).maybeSingle();
+  const { data: match } = await admin.from("matches").select("user_a, user_b, food, status, decide_by").eq("id", matchId).maybeSingle();
   if (!match || (match.user_a !== userId && match.user_b !== userId)) return { ok: false, error: "Match not found" };
   if (match.status !== "pending") return { ok: true, status: match.status as MatchStatus };
 
   const late = new Date(match.decide_by).getTime() < Date.now();
   const final = late ? "skipped" : decision;
   const column = match.user_a === userId ? "a_decision" : "b_decision";
+  const otherId = match.user_a === userId ? match.user_b : match.user_a;
+  if (final === "accepted") {
+    await admin.from("notifications").insert({
+      user_id: otherId,
+      kind: "match_accepted",
+      payload: { matchId, food: match.food },
+    });
+  }
   await admin
     .from("matches")
     .update({ [column]: final, ...(final === "skipped" ? { status: "skipped" } : {}) })
@@ -386,6 +421,7 @@ export async function respondMatch(matchId: string, decision: "accepted" | "skip
   if (after?.status === "pending" && after.a_decision === "accepted" && after.b_decision === "accepted") {
     await admin.from("matches").update({ status: "live" }).eq("id", matchId).eq("status", "pending");
     await admin.from("meetings").upsert({ match_id: matchId }, { onConflict: "match_id", ignoreDuplicates: true });
+    await connectMatchedPair(admin, match.user_a, match.user_b);
     return { ok: true, status: "live" };
   }
   return { ok: true, status: (after?.status ?? "pending") as MatchStatus };

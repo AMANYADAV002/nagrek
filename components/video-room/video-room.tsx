@@ -15,7 +15,8 @@ import { cravingEmoji } from "@/lib/data/cravings";
 import { icebreakers } from "@/lib/data/icebreakers";
 import { track } from "@/lib/analytics";
 import { toneLabel } from "@/lib/format";
-import { endMeeting, getIceServers, markMeetingStarted } from "@/lib/actions/meeting";
+import { endMeeting, markMeetingStarted } from "@/lib/actions/meeting";
+import { loadTurnCredentials } from "@/lib/webrtc/load-turn";
 import { updateSession, useSession } from "@/lib/mock/session";
 import type { MockUser } from "@/lib/types";
 import { usePeer } from "@/lib/webrtc/use-peer";
@@ -106,7 +107,7 @@ export function VideoRoom({
     role: live?.role ?? "a",
     localStream,
     enabled: !!live && cam !== "requesting",
-    loadIce: () => getIceServers(meetingId),
+    loadIce: () => loadTurnCredentials({ matchId: meetingId }),
     onConnected: () => void markMeetingStarted(meetingId),
   });
 

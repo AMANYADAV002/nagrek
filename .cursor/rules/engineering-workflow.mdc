@@ -1,0 +1,20 @@
+---
+description: Sequence required before any Nagrek feature or bugfix is called done
+alwaysApply: true
+---
+
+# Feature workflow
+
+For every feature or bugfix:
+
+1. Restate the requirement and inspect the current code before editing.
+2. Name the files, dependencies, and conflicts.
+3. For a multi-file change, read `.cursor/skills/writing-plans/SKILL.md` and write the plan before editing.
+4. Delegate independent tasks to the project subagents in `.cursor/agents/`. Tasks that share a file stay sequential. Read `.cursor/skills/dispatching-parallel-agents/SKILL.md` before launching parallel work.
+5. Implement the real behavior. Do not substitute mocks unless the user asked.
+6. Run the tests that cover the change. On failure, read `.cursor/skills/systematic-debugging/SKILL.md` and fix the cause.
+7. Read `.cursor/skills/verification-before-completion/SKILL.md` before saying the work is done.
+8. For UI, exercise the flow in the browser, including empty and error states and one neighboring page.
+9. Leave unrelated working code unchanged. Do not add a dependency for a problem the existing stack already solves.
+
+Done means the test command and its result are reported. A failed test stays visible until it passes or an external blocker is named.

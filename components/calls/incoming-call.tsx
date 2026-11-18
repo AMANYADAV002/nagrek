@@ -31,6 +31,7 @@ export function IncomingCallAlert() {
       .select("id")
       .eq("callee_id", userId)
       .eq("status", "ringing")
+      .gte("created_at", new Date(Date.now() - 45_000).toISOString())
       .limit(1)
       .then(({ data }) => {
         if (data?.length) void loadIncomingCall().then((c) => c && setCall(c));

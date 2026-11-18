@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { canApplyLocalAnswer } from "@/lib/webrtc/answer-gate";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { IceConfig, PeerState, SignalMessage } from "@/lib/webrtc/types";
+import type { CallTextMessage, IceConfig, PeerState, SignalMessage } from "@/lib/webrtc/types";
 
 interface Options {
   /** Private Realtime topic, `room:<matchId>` or `call:<callId>`. RLS limits it to the two participants. */
@@ -21,6 +22,8 @@ interface Options {
   loadIce: () => Promise<IceConfig>;
   /** First time the two browsers connect. */
   onConnected?: () => void;
+  /** Text on the same private channel, event "chat". Does not touch the media stream. */
+  onChat?: (message: CallTextMessage) => void;
 }
 
 /**
@@ -28,15 +31,18 @@ interface Options {
  * participants can use (RLS on realtime.messages). Media goes browser-to-browser, or through
  * the TURN relay. Nothing is recorded.
  */
-export function usePeer({ topic, me, partnerId, role, localStream, enabled, video = true, loadIce, onConnected }: Options) {
+export function usePeer({ topic, me, partnerId, role, localStream, enabled, video = true, loadIce, onConnected, onChat }: Options) {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [state, setState] = useState<PeerState>("waiting");
   const leaveRef = useRef<() => void>(() => {});
+  const sendChatRef = useRef<(message: CallTextMessage) => void>(() => {});
   const loadIceRef = useRef(loadIce);
   const onConnectedRef = useRef(onConnected);
+  const onChatRef = useRef(onChat);
   useEffect(() => {
     loadIceRef.current = loadIce;
     onConnectedRef.current = onConnected;
+    onChatRef.current = onChat;
   });
 
   useEffect(() => {
@@ -50,6 +56,7 @@ export function usePeer({ topic, me, partnerId, role, localStream, enabled, vide
 
     const channel = supabase.channel(topic, { config: { private: true, broadcast: { self: false } } });
     const send = (message: SignalMessage) => void channel.send({ type: "broadcast", event: "signal", payload: message });
+    sendChatRef.current = (message) => void channel.send({ type: "broadcast", event: "chat", payload: message });
 
     const flush = async () => {
       while (pc?.remoteDescription && queued.length) await pc.addIceCandidate(queued.shift()).catch(() => {});
@@ -59,9 +66,14 @@ export function usePeer({ topic, me, partnerId, role, localStream, enabled, vide
       if (!pc || pc.signalingState !== "stable") return;
       if (!iceRestart && pc.connectionState === "connected") return;
       setState((s) => (s === "connected" ? s : "connecting"));
-      const sdp = await pc.createOffer({ iceRestart });
-      await pc.setLocalDescription(sdp);
-      send({ type: "offer", from: me, to: partnerId, sdp });
+      try {
+        const sdp = await pc.createOffer({ iceRestart });
+        if (!pc || pc.signalingState !== "stable") return;
+        await pc.setLocalDescription(sdp);
+        send({ type: "offer", from: me, to: partnerId, sdp });
+      } catch {
+        // The peer connection moved on. The next join can offer again once it is stable.
+      }
     };
 
     const handle = async (msg: SignalMessage) => {
@@ -75,14 +87,22 @@ export function usePeer({ topic, me, partnerId, role, localStream, enabled, vide
         case "hello":
           if (role === "a") await offer();
           break;
-        case "offer":
-          if (role !== "b") return;
+        case "offer": {
+          // Join and hello each produce an offer. A second copy, applied while the first
+          // answer already left the connection stable, throws InvalidStateError.
+          if (role !== "b" || pc.signalingState !== "stable") return;
+          if (pc.remoteDescription?.sdp && msg.sdp.sdp && pc.remoteDescription.sdp === msg.sdp.sdp) return;
           setState((s) => (s === "connected" ? s : "connecting"));
           await pc.setRemoteDescription(msg.sdp);
+          if (closed || !canApplyLocalAnswer(pc.signalingState)) return;
           await flush();
-          await pc.setLocalDescription(await pc.createAnswer());
-          send({ type: "answer", from: me, to: partnerId, sdp: pc.localDescription!.toJSON() });
+          if (closed || !canApplyLocalAnswer(pc.signalingState)) return;
+          const answer = await pc.createAnswer();
+          if (closed || !canApplyLocalAnswer(pc.signalingState)) return;
+          await pc.setLocalDescription(answer);
+          if (pc.localDescription) send({ type: "answer", from: me, to: partnerId, sdp: pc.localDescription.toJSON() });
           break;
+        }
         case "answer":
           if (pc.signalingState === "have-local-offer") {
             await pc.setRemoteDescription(msg.sdp);
@@ -99,10 +119,23 @@ export function usePeer({ topic, me, partnerId, role, localStream, enabled, vide
       }
     };
 
+    let tail = Promise.resolve();
+    const enqueue = (msg: SignalMessage) => {
+      tail = tail.then(() => handle(msg)).catch(() => {});
+    };
+
     (async () => {
       const ice = await loadIceRef.current();
       if (closed) return;
-      pc = new RTCPeerConnection({ iceServers: ice.iceServers, iceTransportPolicy: ice.relayOnly ? "relay" : "all" });
+      const iceServers = ice.iceServers.filter((server) => {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+        return urls.some((url) => url.startsWith("turn:") || url.startsWith("turns:"));
+      });
+      if (iceServers.length === 0) {
+        setState("failed");
+        return;
+      }
+      pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: "relay" });
 
       if (localStream) localStream.getTracks().forEach((t) => pc!.addTrack(t, localStream));
       if (role === "a") {
@@ -149,7 +182,12 @@ export function usePeer({ topic, me, partnerId, role, localStream, enabled, vide
 
       await supabase.realtime.setAuth();
       channel
-        .on("broadcast", { event: "signal" }, ({ payload }) => void handle(payload as SignalMessage))
+        .on("broadcast", { event: "signal" }, ({ payload }) => enqueue(payload as SignalMessage))
+        .on("broadcast", { event: "chat" }, ({ payload }) => {
+          const message = payload as CallTextMessage;
+          if (!message?.body || message.from === me) return;
+          onChatRef.current?.(message);
+        })
         .subscribe((status) => {
           if (status === "SUBSCRIBED") send({ type: "join", from: me });
           if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") setState("failed");
@@ -171,5 +209,5 @@ export function usePeer({ topic, me, partnerId, role, localStream, enabled, vide
     };
   }, [enabled, topic, me, partnerId, role, localStream, video]);
 
-  return { remoteStream, state, leave: () => leaveRef.current() };
+  return { remoteStream, state, leave: () => leaveRef.current(), sendChat: (message: CallTextMessage) => sendChatRef.current(message) };
 }

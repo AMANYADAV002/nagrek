@@ -5,14 +5,16 @@ import { CalendarClock, CalendarPlus, Check, MapPin, MapPinCheck, X } from "luci
 import { toast } from "sonner";
 import { LayeredAvatar } from "@/components/avatar/layered-avatar";
 import { GlassCard } from "@/components/glass/glass-card";
-import { GradientButton } from "@/components/glass/gradient-button";
+import { GradientButton, GradientLink } from "@/components/glass/gradient-button";
 import { PageHeader } from "@/components/glass/section-heading";
 import { EmptyState } from "@/components/glass/states";
 import { PlanVisitDialog } from "@/components/visits/plan-visit-dialog";
 import { VerifyButton, VerifyVisitDialog } from "@/components/visits/verify-visit";
+import { useNotifications } from "@/components/notifications/notifications-provider";
 import { cancelVisit, loadVisits, respondVisit, type VisitStreak, type VisitView } from "@/lib/actions/visits";
 import { useSession } from "@/lib/mock/session";
 import { usePeople } from "@/lib/people-client";
+import { restaurantHref } from "@/lib/places/query";
 import { backendEnabled } from "@/lib/supabase/env";
 import { cn } from "@/lib/utils";
 
@@ -32,7 +34,9 @@ function when(iso: string) {
 /** Planned in-person visits and the QR + GPS verification that grows the visit streak. */
 export function VisitsView({ withId }: { withId?: string }) {
   const session = useSession();
+  const { notes } = useNotifications();
   const live = backendEnabled();
+  const visitEvents = notes.filter((n) => n.kind.startsWith("visit_")).map((n) => n.id).join("|");
   const [data, setData] = useState<{ visits: VisitView[]; streak: VisitStreak } | null>(null);
   const [planOpen, setPlanOpen] = useState(!!withId);
   const [verifying, setVerifying] = useState<VisitView | null>(null);
@@ -42,8 +46,15 @@ export function VisitsView({ withId }: { withId?: string }) {
 
   const reload = useCallback(async () => setData(await loadVisits()), []);
   useEffect(() => {
-    if (live) void loadVisits().then(setData);
-  }, [live]);
+    if (!live) return;
+    let cancelled = false;
+    void loadVisits().then((next) => {
+      if (!cancelled) setData(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [live, visitEvents]);
 
   if (!session) return null;
 
@@ -64,11 +75,16 @@ export function VisitsView({ withId }: { withId?: string }) {
     );
   }
 
-  async function act(id: string, run: () => Promise<{ ok: true } | { ok: false; error: string }>, success: string) {
+  async function act(id: string, next: VisitView["status"], run: () => Promise<{ ok: true } | { ok: false; error: string }>, success: string) {
+    const previous = data;
+    setData((current) => (current ? { ...current, visits: current.visits.map((v) => (v.id === id ? { ...v, status: next } : v)) } : current));
     setBusy(id);
     const res = await run();
     setBusy(null);
-    if (!res.ok) return toast.error(res.error);
+    if (!res.ok) {
+      setData(previous);
+      return toast.error(res.error);
+    }
     toast.success(success);
     await reload();
   }
@@ -93,7 +109,14 @@ export function VisitsView({ withId }: { withId?: string }) {
             Best {data?.streak.best ?? 0} · {data?.streak.totalVerified ?? 0} verified in total. One counted visit per person per week, up to two a day. The streak resets after 30 days without a verified visit.
           </p>
         </div>
-        <GradientButton onClick={() => setPlanOpen(true)} disabled={!friends.length}><CalendarPlus /> Plan a visit</GradientButton>
+        <div className="flex flex-wrap gap-2">
+          {withId && friends.some((f) => f.id === withId) && (
+            <GradientLink href={restaurantHref({ withId, name: friends.find((f) => f.id === withId)?.name })}>
+              <MapPin /> Select a Restaurant
+            </GradientLink>
+          )}
+          <GradientButton onClick={() => setPlanOpen(true)} disabled={!friends.length}><CalendarPlus /> Plan a visit</GradientButton>
+        </div>
       </GlassCard>
 
       {!data ? (
@@ -129,8 +152,8 @@ export function VisitsView({ withId }: { withId?: string }) {
                     <div className="mt-auto flex flex-wrap gap-2">
                       {v.status === "proposed" && !v.iProposed && (
                         <>
-                          <GradientButton size="sm" variant="ghost" disabled={busy === v.id} onClick={() => void act(v.id, () => respondVisit(v.id, false), "Declined")}><X /> Decline</GradientButton>
-                          <GradientButton size="sm" disabled={busy === v.id} onClick={() => void act(v.id, () => respondVisit(v.id, true), "Visit confirmed")}><Check /> Accept</GradientButton>
+                          <GradientButton size="sm" variant="ghost" disabled={busy === v.id} onClick={() => void act(v.id, "declined", () => respondVisit(v.id, false), "Declined")}><X /> Decline</GradientButton>
+                          <GradientButton size="sm" disabled={busy === v.id} onClick={() => void act(v.id, "accepted", () => respondVisit(v.id, true), "Visit confirmed")}><Check /> Accept</GradientButton>
                         </>
                       )}
                       {v.status === "accepted" && (
@@ -139,7 +162,7 @@ export function VisitsView({ withId }: { withId?: string }) {
                           : <p className="text-xs text-soft">Verification opens 2 hours before.</p>
                       )}
                       {(v.status === "proposed" || v.status === "accepted") && (
-                        <GradientButton size="sm" variant="ghost" disabled={busy === v.id} onClick={() => void act(v.id, () => cancelVisit(v.id), "Plan cancelled")}>Cancel plan</GradientButton>
+                        <GradientButton size="sm" variant="ghost" disabled={busy === v.id} onClick={() => void act(v.id, "cancelled", () => cancelVisit(v.id), "Plan cancelled")}>Cancel plan</GradientButton>
                       )}
                     </div>
                   </GlassCard>

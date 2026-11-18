@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { Camera, Eye } from "lucide-react";
 import { LayeredAvatar } from "@/components/avatar/layered-avatar";
@@ -13,12 +13,29 @@ import { StoryViewer } from "@/components/story-viewer/story-viewer";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/mock/session";
 import { rawStorySrc, storyHandlers, useStoryGroups } from "@/lib/stories";
+import { clearStoryReturn, peekStoryReturn } from "@/lib/stories/return";
 
 export function StoriesFeed() {
   const session = useSession();
   const [open, setOpen] = useState<number | null>(null);
+  const [resume, setResume] = useState<{ storyId: string; comments: boolean } | null>(null);
   const groups = useStoryGroups(session);
   const [handlers] = useState(storyHandlers);
+  const groupKey = groups.map((group) => group.userId).join();
+
+  useEffect(() => {
+    if (!groups.length) return;
+    const saved = peekStoryReturn(window.location.pathname, "stories-feed");
+    if (!saved) return;
+    const idx = groups.findIndex((group) => group.userId === saved.groupUserId);
+    if (idx < 0) return;
+    clearStoryReturn();
+    queueMicrotask(() => {
+      setResume({ storyId: saved.storyId, comments: saved.comments });
+      setOpen(idx);
+    });
+  }, [groupKey, groups]);
+
   if (!session) return null;
 
   return (
@@ -87,7 +104,10 @@ export function StoriesFeed() {
         <StoryViewer
           groups={groups}
           startGroup={open}
-          onClose={() => setOpen(null)}
+          startStoryId={resume?.storyId}
+          startComments={resume?.comments}
+          surface="stories-feed"
+          onClose={() => { setOpen(null); setResume(null); clearStoryReturn(); }}
           onSeen={handlers.onSeen}
           onDelete={handlers.onDelete}
         />

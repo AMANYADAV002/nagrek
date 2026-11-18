@@ -1,3 +1,4 @@
+import { dietCompatible, type FoodTier } from "@/lib/matching/food";
 import type { Dietary, GeoPoint, Tone } from "@/lib/types";
 
 /**
@@ -30,7 +31,7 @@ export interface MatchResult {
   /** 0–100, rounded. 0 whenever `compatible` is false. */
   score: number;
   compatible: boolean;
-  reason?: "tone" | "food" | "distance";
+  reason?: "tone" | "food" | "distance" | "dietary";
   distanceKm?: number;
   breakdown: Record<keyof typeof MATCH_WEIGHTS, number>;
 }
@@ -63,13 +64,8 @@ function foodScore(a: string[], b: string[], craving?: string): number {
   return union === 0 ? 0 : shared / union;
 }
 
-const PLANT_BASED: Dietary[] = ["veg", "vegan", "jain", "eggetarian"];
-
 function dietaryScore(a: Dietary, b: Dietary): number {
-  if (a === b) return 1;
-  if (PLANT_BASED.includes(a) && PLANT_BASED.includes(b)) return 0.6;
-  if ((a === "halal" && b === "non-veg") || (a === "non-veg" && b === "halal")) return 0.6;
-  return 0.2;
+  return a === b ? 1 : 0.75;
 }
 
 function budgetScore([aMin, aMax]: [number, number], [bMin, bMax]: [number, number]): number {
@@ -87,30 +83,39 @@ function languageScore(a: string[], b: string[]): number {
  * Score how well `b` fits `a`. Hard filters (tone, shared food, distance)
  * make the pair incompatible; otherwise the weighted sum is returned.
  * Pass `craving` to score against a live request instead of saved interests.
+ * Pass `tier` when the caller already decided the food relation, so a category
+ * match such as paratha and chole bhature is not rejected as a different dish.
  */
-export function matchingScore(a: MatchProfile, b: MatchProfile, opts: { craving?: string } = {}): MatchResult {
+export function matchingScore(a: MatchProfile, b: MatchProfile, opts: { craving?: string; tier?: FoodTier } = {}): MatchResult {
   const breakdown = { food: 0, distance: 0, tone: 0, dietary: 0, budget: 0, language: 0 };
   const fail = (reason: MatchResult["reason"], distanceKm?: number): MatchResult => ({
     score: 0, compatible: false, reason, distanceKm, breakdown,
   });
 
-  if (!toneCompatible(a.tone, b.tone)) return fail("tone");
+  // An exact live craving is shown even when tone or distance would normally reject the pair.
+  // Diet stays a hard stop on every tier.
+  const mutualCraving = opts.tier === "craving";
+  if (!toneCompatible(a.tone, b.tone) && !mutualCraving) return fail("tone");
+  if (!dietCompatible(a.dietary, b.dietary)) return fail("dietary");
 
-  breakdown.food = foodScore(a.foodInterests, b.foodInterests, opts.craving);
+  const tierFood = opts.tier === "craving" ? 1 : opts.tier === "saved" ? 0.85 : opts.tier === "category" ? 0.7 : 0;
+  breakdown.food = opts.tier ? tierFood : foodScore(a.foodInterests, b.foodInterests, opts.craving);
   if (breakdown.food === 0) return fail("food");
 
   let distanceKm: number | undefined;
   if (a.point && b.point) {
     distanceKm = haversineKm(a.point, b.point);
-    if (distanceKm > MAX_DISTANCE_KM) return fail("distance", distanceKm);
-    breakdown.distance = 1 - distanceKm / MAX_DISTANCE_KM;
+    if (distanceKm > MAX_DISTANCE_KM && !mutualCraving) return fail("distance", distanceKm);
+    breakdown.distance = distanceKm > MAX_DISTANCE_KM ? 0.15 : 1 - distanceKm / MAX_DISTANCE_KM;
   } else if (norm(a.city) === norm(b.city)) {
     breakdown.distance = 0.5;
+  } else if (mutualCraving) {
+    breakdown.distance = 0.2;
   } else {
     return fail("distance");
   }
 
-  breakdown.tone = a.tone === b.tone ? 1 : 0.7;
+  breakdown.tone = a.tone === b.tone ? 1 : mutualCraving ? 0.45 : 0.7;
   breakdown.dietary = dietaryScore(a.dietary, b.dietary);
   breakdown.budget = budgetScore(a.budget, b.budget);
   breakdown.language = languageScore(a.languages, b.languages);

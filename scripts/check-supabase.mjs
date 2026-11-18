@@ -82,8 +82,20 @@ section("accounts", async () => {
   step("onboarding blocked without consent", raised(skipErr, "Consent required"), skipErr?.message);
 
   await me.client.from("consents").insert({ user_id: me.id, adult: true, respectful: true, terms_version: "check" });
+  const { error: noDobErr } = await me.client.rpc("complete_onboarding");
+  step("onboarding blocked without an adult date of birth", raised(noDobErr, "18 and over"), noDobErr?.message);
+
+  const prefs = {
+    user_id: me.id, food_interests: ["Biryani"], tone: "casual", city: "Bengaluru", dietary: "veg",
+    budget_min: 200, budget_max: 800, group_size: "one-on-one", time_slots: [], languages: [], topics: [], goals: [],
+  };
+  const minorDob = new Date(Date.now() - 17 * 365.25 * 86_400_000).toISOString().slice(0, 10);
+  const { error: minorErr } = await me.client.from("user_preferences").upsert({ ...prefs, date_of_birth: minorDob });
+  step("under-18 date of birth refused", !!minorErr, minorErr?.message);
+
+  await me.client.from("user_preferences").upsert({ ...prefs, date_of_birth: "1995-01-01" });
   const { error: doneErr } = await me.client.rpc("complete_onboarding");
-  step("onboarding completes after consent", !doneErr, doneErr?.message);
+  step("onboarding completes after consent and adult date of birth", !doneErr, doneErr?.message);
 
   const { error: planHackErr } = await me.client.from("profiles").update({ plan_id: "ultra" }).eq("id", me.id);
   step("client cannot set its own plan", denied(planHackErr), planHackErr?.message);

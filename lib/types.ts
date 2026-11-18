@@ -59,6 +59,8 @@ export interface MockUser {
   budget: [number, number];
   languages: string[];
   trustScore: number;
+  /** Whole years. Absent when the profile has no date of birth. The raw date is never sent. */
+  age?: number;
   streak: number;
   plan: PlanId;
   avatar: AvatarConfig;

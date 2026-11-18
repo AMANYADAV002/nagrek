@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { CalendarPlus } from "lucide-react";
+import { CalendarPlus, Utensils } from "lucide-react";
 import { toast } from "sonner";
-import { GradientButton } from "@/components/glass/gradient-button";
+import { GradientButton, GradientLink } from "@/components/glass/gradient-button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { proposeVisit } from "@/lib/actions/visits";
+import { restaurantHref } from "@/lib/places/query";
 
 /** `datetime-local` value for a time in the browser's timezone. */
 function localInput(d: Date) {
@@ -22,6 +23,7 @@ export function PlanVisitDialog({
   people,
   defaultPersonId,
   callId,
+  craving,
   onPlanned,
 }: {
   open: boolean;
@@ -29,6 +31,8 @@ export function PlanVisitDialog({
   people: { id: string; name: string }[];
   defaultPersonId?: string;
   callId?: string;
+  /** Shared craving for this match, used to pre-select restaurant filters. */
+  craving?: string | null;
   onPlanned?: () => void;
 }) {
   const [personId, setPersonId] = useState(defaultPersonId ?? "");
@@ -87,6 +91,11 @@ export function PlanVisitDialog({
             </select>
           ) : (
             <p className="text-sm">With <span className="font-semibold">{people[0]?.name}</span></p>
+          )}
+          {!place.trim() && chosen && (
+            <GradientLink href={restaurantHref({ withId: chosen, name: people.find((p) => p.id === chosen)?.name, food: craving })}>
+              <Utensils className="size-4" /> Select a Restaurant
+            </GradientLink>
           )}
           <Input aria-label="Place" placeholder="Place (e.g. Third Wave Coffee)" value={place} onChange={(e) => setPlace(e.target.value)} maxLength={120} className={field} required />
           <Input aria-label="Area" placeholder="Area (optional, e.g. Indiranagar)" value={area} onChange={(e) => setArea(e.target.value)} maxLength={120} className={field} />

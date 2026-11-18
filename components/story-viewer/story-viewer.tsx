@@ -6,8 +6,10 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Eye, Flag, Pause, Play, Trash2, X } from "lucide-react";
 import { LayeredAvatar } from "@/components/avatar/layered-avatar";
 import { ReportDialog } from "@/components/safety/report-dialog";
+import { StoryCommentButton, StoryCommentDrawer, useStoryThread } from "@/components/story-viewer/story-comments";
 import { timeAgo } from "@/lib/format";
 import { rawStorySrc } from "@/lib/stories";
+import type { StoryReturn } from "@/lib/stories/return";
 import type { AvatarConfig, Story } from "@/lib/types";
 
 export interface StoryGroup {
@@ -27,6 +29,9 @@ const IMAGE_DURATION_MS = 5000;
 export function StoryViewer({
   groups,
   startGroup = 0,
+  startStoryId,
+  startComments = false,
+  surface = "stories-row",
   onClose,
   onSeen,
   onDelete,
@@ -34,15 +39,22 @@ export function StoryViewer({
 }: {
   groups: StoryGroup[];
   startGroup?: number;
+  startStoryId?: string;
+  startComments?: boolean;
+  surface?: StoryReturn["surface"];
   onClose: () => void;
   onSeen?: (storyId: string) => void;
   onDelete?: (storyId: string) => void;
   onHide?: (storyId: string) => void;
 }) {
   const [g, setG] = useState(startGroup);
-  const [i, setI] = useState(0);
+  const [i, setI] = useState(() => {
+    const found = startStoryId ? groups[startGroup]?.stories.findIndex((item) => item.id === startStoryId) ?? -1 : -1;
+    return found >= 0 ? found : 0;
+  });
   const [progress, setProgress] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(startComments);
   const [reportOpen, setReportOpen] = useState(false);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const held = useRef(false);
@@ -50,6 +62,9 @@ export function StoryViewer({
 
   const group = groups[g];
   const story = group?.stories[i];
+  const upcoming = group?.stories[i + 1] ?? groups[g + 1]?.stories[0];
+  const thread = useStoryThread(story?.id ?? "");
+  const hold = paused || commentsOpen || reportOpen;
 
   const next = useCallback(() => {
     setProgress(0);
@@ -75,10 +90,26 @@ export function StoryViewer({
     if (storyId) onSeen?.(storyId);
   }, [storyId, onSeen]);
 
+  // The next story's file starts loading while this one is on screen.
+  useEffect(() => {
+    if (!upcoming?.src) return;
+    if (upcoming.kind === "video") {
+      const video = document.createElement("video");
+      video.preload = "auto";
+      video.src = upcoming.src;
+      video.load();
+      return () => {
+        video.src = "";
+      };
+    }
+    const img = document.createElement("img");
+    img.src = upcoming.src;
+  }, [upcoming?.src, upcoming?.kind]);
+
   // Image timer. Videos drive progress from their own timeupdate events.
   const storyKind = story?.kind;
   useEffect(() => {
-    if (!storyId || storyKind === "video" || paused || reportOpen) return;
+    if (!storyId || storyKind === "video" || hold) return;
     let raf = 0;
     let last = performance.now();
     const tick = (now: number) => {
@@ -96,18 +127,24 @@ export function StoryViewer({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [storyId, storyKind, paused, reportOpen, next]);
+  }, [storyId, storyKind, hold, next]);
 
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    if (paused || reportOpen) v.pause();
+    if (hold) v.pause();
     else v.play().catch(() => {});
-  }, [paused, reportOpen, storyId]);
+  }, [hold, storyId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (reportOpen) return;
+      if (commentsOpen) {
+        if (e.key === "Escape") setCommentsOpen(false);
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea")) return;
       if (e.key === "Escape") onClose();
       if (e.key === "ArrowRight") next();
       if (e.key === "ArrowLeft") prev();
@@ -118,11 +155,12 @@ export function StoryViewer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [next, prev, onClose, reportOpen]);
+  }, [next, prev, onClose, reportOpen, commentsOpen]);
 
   if (!group || !story) return null;
 
   function onPointerDown() {
+    if (commentsOpen) return;
     held.current = false;
     holdTimer.current = setTimeout(() => {
       held.current = true;
@@ -131,6 +169,7 @@ export function StoryViewer({
   }
 
   function onPointerUp(e: React.PointerEvent) {
+    if (commentsOpen) return;
     if (holdTimer.current) clearTimeout(holdTimer.current);
     if (held.current) {
       setPaused(false);
@@ -144,7 +183,7 @@ export function StoryViewer({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl" role="dialog" aria-modal aria-label={`${group.name}'s story`}>
       <motion.div
-        drag="y"
+        drag={commentsOpen ? false : "y"}
         dragConstraints={{ top: 0, bottom: 0 }}
         dragElastic={{ top: 0, bottom: 0.6 }}
         onDragEnd={(_, info) => info.offset.y > 120 && onClose()}
@@ -177,7 +216,7 @@ export function StoryViewer({
               // eslint-disable-next-line @next/next/no-img-element
               <img src={story.src} alt={story.caption ?? "Story"} className="size-full object-cover" />
             ) : (
-              <Image src={story.src} alt={story.caption ?? "Story"} fill sizes="448px" className="object-cover" priority />
+              <Image src={story.src} alt={story.caption ?? "Story"} fill sizes="448px" className="object-cover" preload />
             )}
           </motion.div>
         </AnimatePresence>
@@ -185,7 +224,7 @@ export function StoryViewer({
 
         {/* tap zones */}
         <div
-          className="absolute inset-0 z-10 touch-none select-none"
+          className={`absolute inset-0 z-10 touch-none select-none ${commentsOpen ? "pointer-events-none" : ""}`}
           onPointerDown={onPointerDown}
           onPointerUp={onPointerUp}
           onPointerLeave={() => holdTimer.current && clearTimeout(holdTimer.current)}
@@ -238,15 +277,21 @@ export function StoryViewer({
         </div>
 
         {/* footer */}
-        <div className="absolute inset-x-4 bottom-6 z-20 space-y-2">
-          {story.caption && <p className="text-base font-medium [text-shadow:0_2px_10px_#000]">{story.caption}</p>}
-          {group.isMine && (
-            <p className="flex items-center gap-1.5 text-xs text-white/80">
-              <Eye className="size-3.5" aria-hidden /> {story.views} views
-            </p>
-          )}
-          <p className="text-[10px] text-white/50">Tap to advance · hold to pause · swipe down to close</p>
+        <div className="absolute inset-x-4 bottom-6 z-20 flex items-end gap-3">
+          <div className="min-w-0 flex-1 space-y-2">
+            {story.caption && <p className="text-base font-medium [text-shadow:0_2px_10px_#000]">{story.caption}</p>}
+            {group.isMine && (
+              <p className="flex items-center gap-1.5 text-xs text-white/80">
+                <Eye className="size-3.5" aria-hidden /> {story.views} views
+              </p>
+            )}
+            <p className="text-[10px] text-white/50">Tap to advance · hold to pause · swipe down to close</p>
+          </div>
+          <StoryCommentButton count={thread.count} onClick={() => setCommentsOpen(true)} />
         </div>
+        {commentsOpen && story.id && (
+          <StoryCommentDrawer storyId={story.id} groupUserId={group.userId} surface={surface} thread={thread} onClose={() => setCommentsOpen(false)} />
+        )}
       </motion.div>
 
       <ReportDialog

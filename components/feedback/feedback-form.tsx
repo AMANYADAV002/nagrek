@@ -19,10 +19,12 @@ import { sendConnection, setFollow } from "@/lib/actions/account";
 import { submitFeedback } from "@/lib/actions/meeting";
 import { getStoryConsent, requestStoryConsent } from "@/lib/actions/stories";
 import { syncBackend } from "@/lib/db/remote";
+import { useDraft } from "@/lib/draft";
 import { updateSession, useSession } from "@/lib/mock/session";
 import type { MockUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+const EMPTY_TAGS: string[] = [];
 const POSITIVE = ["Respectful", "Fun", "On time", "Great listener", "Good food tips"];
 const NEGATIVE = ["Uncomfortable", "Rude", "Late", "Not as described"];
 
@@ -46,10 +48,10 @@ export function FeedbackForm({
 }) {
   const router = useRouter();
   const session = useSession();
-  const [rating, setRating] = useState(0);
+  const [rating, setRating, clearRating] = useDraft(`feedback-${meetingId}-rating`, 0);
   const [hover, setHover] = useState(0);
-  const [tags, setTags] = useState<string[]>([]);
-  const [text, setText] = useState("");
+  const [tags, setTags, clearTags] = useDraft<string[]>(`feedback-${meetingId}-tags`, EMPTY_TAGS);
+  const [text, setText, clearText] = useDraft(`feedback-${meetingId}-text`, "");
   const [error, setError] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [done, setDone] = useState(false);
@@ -72,13 +74,21 @@ export function FeedbackForm({
     if (!parsed.success) return setError(parsed.error.issues[0]?.message ?? "Invalid feedback");
     if (live) {
       setSending(true);
-      const res = await submitFeedback(meetingId, parsed.data);
-      setSending(false);
-      if (!res.ok) return setError(res.error);
+      try {
+        const res = await submitFeedback(meetingId, parsed.data);
+        if (!res.ok) return setError(res.error);
+      } catch {
+        return setError("Could not send that. Try again.");
+      } finally {
+        setSending(false);
+      }
     }
     updateSession((s) => ({
       feedback: [...s.feedback, { meetingId, partnerId: partner.id, ...parsed.data, createdAt: new Date().toISOString() }],
     }));
+    clearRating();
+    clearTags();
+    clearText();
     setDone(true);
   }
 

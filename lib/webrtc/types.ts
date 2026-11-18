@@ -19,7 +19,16 @@ export interface IceConfig {
 
 export type PeerState = "waiting" | "connecting" | "connected" | "weak" | "reconnecting" | "failed" | "left";
 
+/** Text sent on the call channel, event "chat". The WebRTC media stream is separate. */
+export interface CallTextMessage {
+  id: string;
+  from: string;
+  body: string;
+  at: number;
+  kind?: "text" | "emoji" | "gif" | "sticker";
+}
+
+/** Host and STUN candidates reveal a real IP address. Calls use the TURN relay only. */
 export function stunServersFromEnv(): RTCIceServer[] {
-  const stun = (process.env.NEXT_PUBLIC_STUN_URLS ?? "stun:stun.l.google.com:19302").split(",").map((s) => s.trim()).filter(Boolean);
-  return [{ urls: stun }];
+  return [];
 }

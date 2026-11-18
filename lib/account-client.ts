@@ -1,13 +1,15 @@
-import type { SessionState } from "@/lib/mock/session";
+import { loadAccount, type AccountResult } from "@/lib/account-load";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
-export type AccountResult = { account: SessionState | null; error?: string };
+export type { AccountResult };
 
+/** Reads the account with the browser session, which is the session sign-in just created. */
 export async function fetchMyAccount(): Promise<AccountResult> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return { account: null };
   try {
-    const res = await fetch("/api/me", { cache: "no-store", credentials: "same-origin" });
-    if (!res.ok) return { account: null, error: "Could not load your account" };
-    return (await res.json()) as AccountResult;
+    return await loadAccount(supabase);
   } catch {
-    return { account: null, error: "Could not reach the server" };
+    return { account: null, error: "Could not load your account" };
   }
 }

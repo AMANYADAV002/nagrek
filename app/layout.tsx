@@ -35,7 +35,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`dark ${manrope.variable} ${spaceGrotesk.variable} ${caveat.variable} h-full`}
       data-scroll-behavior="smooth"
     >
-      <body className="min-h-full">
+      <body className="min-h-full" suppressHydrationWarning>
         <a
           href="#main"
           className="sr-only z-50 rounded-full bg-brand px-4 py-2 text-ink focus:not-sr-only focus:fixed focus:top-3 focus:left-3"

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { bestTier, dietCompatible, foodLevel, sameCategory } from "@/lib/matching/food";
 import {
   MATCH_WEIGHTS, MAX_DISTANCE_KM, haversineKm, matching_score, matchingScore, rankCandidates, toneCompatible,
   type MatchProfile,
@@ -79,14 +80,61 @@ describe("matchingScore", () => {
     expect(100).toBeGreaterThan(lessFood);
   });
 
-  it("gives partial dietary and budget credit", () => {
+  it("gives partial budget credit and keeps veg with vegan", () => {
     const r = matchingScore(profile({ dietary: "veg", budget: [200, 400] }), profile({ dietary: "vegan", budget: [300, 600] }));
-    expect(r.breakdown.dietary).toBe(0.6);
+    expect(r.compatible).toBe(true);
+    expect(r.breakdown.dietary).toBe(0.75);
     expect(r.breakdown.budget).toBeCloseTo(100 / 400);
+  });
+
+  it("never crosses a dietary line", () => {
+    expect(matchingScore(profile({ dietary: "veg" }), profile({ dietary: "non-veg" })).reason).toBe("dietary");
+    expect(matchingScore(profile({ dietary: "jain" }), profile({ dietary: "non-veg" })).reason).toBe("dietary");
+    expect(matchingScore(profile({ dietary: "halal" }), profile({ dietary: "non-veg" })).reason).toBe("dietary");
+    expect(matchingScore(profile({ dietary: "vegan" }), profile({ dietary: "eggetarian" })).reason).toBe("dietary");
+    expect(dietCompatible("jain", "veg")).toBe(false);
+    expect(dietCompatible("jain", "jain")).toBe(true);
+    expect(dietCompatible("veg", "eggetarian")).toBe(true);
   });
 
   it("is exported under the brief's name", () => {
     expect(matching_score).toBe(matchingScore);
+  });
+});
+
+describe("food tiers", () => {
+  it("treats paratha and chole bhature as the same North Indian category", () => {
+    expect(sameCategory("Paratha", "Chole bhature")).toBe(true);
+    expect(sameCategory("Paratha", "Sushi")).toBe(false);
+    expect(foodLevel("Paratha", [], "Chole bhature", [])).toBe("category");
+  });
+
+  it("prefers the live craving, then a saved food, and only then a category", () => {
+    expect(foodLevel("Paratha", ["Dosa"], "Paratha", ["Sushi"])).toBe("craving");
+    expect(foodLevel("Paratha", ["Dosa"], "Ramen", ["Paratha"])).toBe("saved");
+    expect(foodLevel("Paratha", ["Dosa"], "Dosa", ["Coffee"])).toBe("saved");
+    expect(foodLevel("Paratha", [], null, ["Chole bhature"])).toBe("category");
+    const chosen = bestTier([
+      { tier: "category" as const, id: "north" },
+      { tier: "saved" as const, id: "listed" },
+      { tier: "craving" as const, id: "now" },
+    ]);
+    expect(chosen.map((r) => r.id)).toEqual(["now"]);
+  });
+
+  it("still recommends two people craving the same dish when tone or city differs", () => {
+    const other = profile({ tone: "professional", city: "Delhi", point: undefined, foodInterests: ["Pizza"] });
+    const mine = profile({ foodInterests: ["Pizza"] });
+    expect(matchingScore(mine, other).compatible).toBe(false);
+    expect(matchingScore(mine, other, { tier: "craving" }).compatible).toBe(true);
+    expect(matchingScore(profile({ dietary: "jain" }), profile({ dietary: "veg" }), { tier: "craving" }).reason).toBe("dietary");
+  });
+
+  it("scores a category match below an exact craving", () => {
+    const exact = matchingScore(base, profile({ foodInterests: ["Paratha"] }), { tier: "craving" }).score;
+    const cousin = matchingScore(base, profile({ foodInterests: ["Chole bhature"] }), { tier: "category" }).score;
+    expect(exact).toBeGreaterThan(cousin);
+    expect(cousin).toBeGreaterThan(0);
   });
 });
 

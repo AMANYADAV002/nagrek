@@ -9,8 +9,10 @@ import { LayeredAvatar } from "@/components/avatar/layered-avatar";
 import { GradientButton } from "@/components/glass/gradient-button";
 import { cravingEmoji } from "@/lib/data/cravings";
 import { toneLabel } from "@/lib/format";
-import { getMatchState, respondMatch, type Decision, type MatchStatus } from "@/lib/actions/matching";
+import { respondMatch, type Decision, type MatchStatus } from "@/lib/actions/matching";
 import { MATCH_DECISION_MS } from "@/lib/matching/live";
+import { useSession } from "@/lib/mock/session";
+import { whenRouterReady } from "@/lib/nav";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { MockUser } from "@/lib/types";
 
@@ -27,14 +29,17 @@ const secondsUntil = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTi
  */
 export function PreMeet({ matchId, partner, food, live }: { matchId: string; partner: MockUser; food: string; live?: LiveState }) {
   const router = useRouter();
+  const me = useSession()?.user?.id;
   const windowS = live ? LIVE_WINDOW_S : DEMO_WINDOW_S;
   const [left, setLeft] = useState(() => (live ? secondsUntil(live.decideBy) : DEMO_WINDOW_S));
   const [mine, setMine] = useState<Decision>(live?.mine ?? "pending");
   const [theirs, setTheirs] = useState<Decision>(live?.theirs ?? "pending");
   const [status, setStatus] = useState<MatchStatus>(live?.status ?? "pending");
+  const [askError, setAskError] = useState("");
   const bothAccepted = live ? status === "live" || status === "ended" : mine === "accepted" && theirs === "accepted";
   const roomUrl = live ? `/room/${matchId}` : `/room/${matchId}?with=${partner.id}&food=${encodeURIComponent(food)}`;
   const decided = useRef(false);
+  const isLive = Boolean(live);
 
   useEffect(() => {
     if (bothAccepted) return;
@@ -49,41 +54,55 @@ export function PreMeet({ matchId, partner, food, live }: { matchId: string; par
     return () => clearTimeout(t);
   }, [live]);
 
-  // Live: decisions stream in over Realtime, with a slow poll in case the socket drops.
+  // Live: decisions stream in over Realtime. The browser reads the row (RLS: your matches).
+  // A server-action poll here queued behind every other action and stalled the app.
   useEffect(() => {
-    if (!live) return;
+    if (!isLive || !me) return;
+    let cancelled = false;
     const apply = (s: { status: MatchStatus; mine: Decision; theirs: Decision }) => {
       setStatus(s.status);
       setMine(s.mine);
       setTheirs(s.theirs);
     };
+    const load = async () => {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) return;
+      const { data } = await supabase.from("matches").select("user_a, status, a_decision, b_decision").eq("id", matchId).maybeSingle();
+      if (cancelled || !data) return;
+      const mineIsA = data.user_a === me;
+      apply({
+        status: data.status as MatchStatus,
+        mine: (mineIsA ? data.a_decision : data.b_decision) as Decision,
+        theirs: (mineIsA ? data.b_decision : data.a_decision) as Decision,
+      });
+    };
     const supabase = getSupabaseBrowserClient();
     const channel = supabase
       ?.channel(`match:${matchId}`)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "matches", filter: `id=eq.${matchId}` }, () => {
-        void getMatchState(matchId).then((s) => s && apply(s));
-      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "matches", filter: `id=eq.${matchId}` }, () => void load().catch(() => {}))
       .subscribe();
-    const poll = setInterval(() => void getMatchState(matchId).then((s) => s && apply(s)), 4000);
+    void load().catch(() => {});
+    const poll = setInterval(() => void load().catch(() => {}), 10_000);
     return () => {
+      cancelled = true;
       clearInterval(poll);
       if (channel) void supabase?.removeChannel(channel);
     };
-  }, [live, matchId]);
+  }, [isLive, matchId, me]);
 
   useEffect(() => {
     if (!live || status !== "skipped" || decided.current) return;
     decided.current = true;
     toast.message(mine === "skipped" ? "Skipped. We will find someone else." : "This match didn't happen this time. Try another craving.");
-    router.replace("/dashboard");
+    whenRouterReady(() => router.replace("/dashboard"));
   }, [live, status, mine, router]);
 
   useEffect(() => {
     if (left > 0 || bothAccepted || decided.current) return;
     decided.current = true;
     toast.message("Time's up — this match was skipped.");
-    if (live) void respondMatch(matchId, "skipped");
-    router.replace("/dashboard");
+    if (live) void respondMatch(matchId, "skipped").catch(() => {});
+    whenRouterReady(() => router.replace("/dashboard"));
   }, [left, bothAccepted, live, matchId, router]);
 
   async function decide(decision: "accepted" | "skipped") {
@@ -91,23 +110,39 @@ export function PreMeet({ matchId, partner, food, live }: { matchId: string; par
     if (!live) {
       if (decision === "skipped") {
         toast.message("Skipped. We will find someone else.");
-        router.replace("/dashboard");
+        whenRouterReady(() => router.replace("/dashboard"));
       }
       return;
     }
-    const res = await respondMatch(matchId, decision);
+    let res: Awaited<ReturnType<typeof respondMatch>>;
+    try {
+      res = await respondMatch(matchId, decision);
+    } catch {
+      setAskError("Could not send that. Try again.");
+      setMine("pending");
+      toast.error("Could not send that. Try again.");
+      return;
+    }
     if (!res.ok) {
+      setAskError(res.error);
+      setMine("pending");
       toast.error(res.error);
       return;
     }
+    setAskError("");
     setStatus(res.status);
   }
 
   useEffect(() => {
-    if (!bothAccepted) return;
+    if (!bothAccepted || !live) return;
+    window.dispatchEvent(new Event("nagrek:match-live"));
+  }, [bothAccepted, live]);
+
+  useEffect(() => {
+    if (!bothAccepted || live) return;
     const t = setTimeout(() => router.push(roomUrl), 1600);
     return () => clearTimeout(t);
-  }, [bothAccepted, router, roomUrl]);
+  }, [bothAccepted, live, router, roomUrl]);
 
   const R = 52;
   const C = 2 * Math.PI * R;
@@ -164,7 +199,7 @@ export function PreMeet({ matchId, partner, food, live }: { matchId: string; par
           {bothAccepted && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="absolute inset-x-0 bottom-5 flex justify-center">
               <span className="glass-strong flex items-center gap-2 rounded-full px-4 py-2 text-sm">
-                <Heart className="size-4 text-peach" aria-hidden /> You both said yes — joining the table…
+                <Heart className="size-4 text-peach" aria-hidden /> You both said yes. Pick a voice or video call.
               </span>
             </motion.div>
           )}
@@ -188,15 +223,17 @@ export function PreMeet({ matchId, partner, food, live }: { matchId: string; par
             <SkipForward /> Skip
           </GradientButton>
           <GradientButton size="lg" className="flex-1" onClick={() => void decide("accepted")}>
-            <Check /> Accept
+            <Check /> {askError ? "Try again" : "Accept"}
           </GradientButton>
         </div>
       ) : (
         <p className="flex items-center gap-2 text-sm text-soft">
           {bothAccepted ? (
             <>
-              <Check className="size-4 text-peach" aria-hidden /> Connecting video…
+              <Check className="size-4 text-peach" aria-hidden /> {live ? "Accepted. Opening the call." : "Connecting video…"}
             </>
+          ) : status === "skipped" ? (
+            <>Request declined.</>
           ) : (
             <>
               <Loader2 className="size-4 animate-spin text-peach" aria-hidden /> Waiting for {partner.name.split(" ")[0]}…
@@ -204,7 +241,8 @@ export function PreMeet({ matchId, partner, food, live }: { matchId: string; par
           )}
         </p>
       )}
-      <p className="text-[11px] text-soft">Video stays blurred until you both accept. Nothing is recorded.</p>
+      {askError && <p role="alert" className="text-xs text-peach">{askError}</p>}
+      <p className="text-[11px] text-soft">Video stays blurred until you both accept. Nothing is recorded. On the call, the message button opens text over the video.</p>
     </div>
   );
 }

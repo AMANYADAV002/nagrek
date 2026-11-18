@@ -9,6 +9,8 @@ import { GradientButton, GradientLink } from "@/components/glass/gradient-button
 import { PageHeader } from "@/components/glass/section-heading";
 import { Stagger, StaggerItem } from "@/components/motion/stagger";
 import { Flame } from "@/components/streak/flame";
+import { useLocalWeather } from "@/components/streak/use-local-weather";
+import { WeatherBackdrop } from "@/components/streak/weather-backdrop";
 import { Switch } from "@/components/ui/switch";
 import { getPlan } from "@/lib/config/plans";
 import { levelFor, STREAK_MILESTONES } from "@/lib/config/streak";
@@ -46,6 +48,9 @@ export function StreakView() {
     void loadRewards().then(setData);
     void loadLeaderboard().then(setBoard);
   }, [live]);
+
+  const place = session?.preferences?.location;
+  const weather = useLocalWeather(place?.city, place?.point?.lat, place?.point?.lng);
 
   if (!session) return null;
 
@@ -96,26 +101,28 @@ export function StreakView() {
     <div className="space-y-8">
       <PageHeader eyebrow={`${month} streak`} title={<>Keep the <span className="text-brand">fire</span> going</>} description="A day counts when you complete at least one meeting or accept a join request that turns into one. Your streak resets at the start of each month." />
 
-      <GlassCard strong className="relative overflow-hidden p-6 md:p-10">
-        <div className="flex flex-col items-center gap-8 md:flex-row">
+      <section className="relative overflow-hidden rounded-2xl border border-white/12 p-6 md:p-10" aria-label={`${weather.place}, ${weather.label}`}>
+        <WeatherBackdrop scene={weather.scene} />
+        <div className="relative z-10 flex flex-col items-center gap-8 md:flex-row">
           <div className="relative">
             <Flame intensity={Math.min(1, streak / 30)} size={190} />
             <motion.span
               key={streak}
               initial={{ scale: 0.5, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="absolute inset-x-0 bottom-6 text-center font-heading text-5xl font-bold text-ink drop-shadow"
+              className="absolute inset-x-0 bottom-6 text-center font-heading text-5xl font-bold text-cream drop-shadow-[0_2px_10px_rgba(0,0,0,0.85)]"
             >
               {streak}
             </motion.span>
           </div>
-          <div className="w-full flex-1 space-y-5">
+          <div className="w-full flex-1 space-y-5 rounded-3xl bg-ink/60 p-5 text-cream shadow-[0_10px_40px_rgba(0,0,0,0.25)] backdrop-blur-md">
+            <p className="text-xs text-cream/80">{weather.place} · {weather.label}</p>
             <div className="flex flex-wrap items-center gap-3">
               <span className="rounded-full bg-brand px-3 py-1 text-xs font-bold text-ink">Level · {level.name}</span>
-              <span className="text-sm text-soft">{streak} day{streak === 1 ? "" : "s"} this month</span>
+              <span className="text-sm text-cream/75">{streak} day{streak === 1 ? "" : "s"} this month</span>
             </div>
             <div>
-              <div className="mb-2 flex justify-between text-xs text-soft">
+              <div className="mb-2 flex justify-between text-xs text-cream/70">
                 <span>{prev} days</span>
                 <span>{next ? `${next - streak} more to ${next}-day milestone` : "All milestones reached!"}</span>
                 <span>{next ?? prev} days</span>
@@ -131,7 +138,7 @@ export function StreakView() {
                   <motion.div
                     key={m}
                     whileHover={{ y: -3 }}
-                    className={cn("rounded-2xl border p-3 text-center", reached ? "border-peach/60 bg-peach/10" : "border-white/10 bg-white/[0.02]")}
+                    className={cn("rounded-2xl border p-3 text-center backdrop-blur-sm", reached ? "border-peach/60 bg-ink/45" : "border-white/15 bg-ink/35")}
                   >
                     <Trophy className={cn("mx-auto size-5", reached ? "text-peach" : "text-white/25")} aria-hidden />
                     <p className="mt-1 font-heading text-lg">{m}</p>
@@ -140,13 +147,13 @@ export function StreakView() {
                 );
               })}
             </div>
-            <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs text-soft">
+            <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-ink/40 px-4 py-3 text-xs text-cream/75">
               <Snowflake className="size-4 text-sky-300" aria-hidden />
               Streak freeze — protect your streak for one missed day. {session.plan === "ultra" ? "Coming soon for Ultra." : "Ultra perk, coming soon."}
             </div>
           </div>
         </div>
-      </GlassCard>
+      </section>
 
       <GlassCard className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center">
         <span className="grid size-16 shrink-0 place-items-center rounded-2xl bg-brand font-heading text-3xl font-bold text-ink">{visits}</span>

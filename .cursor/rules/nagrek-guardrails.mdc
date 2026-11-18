@@ -1,0 +1,15 @@
+---
+description: Nagrek stack limits that every change must keep
+alwaysApply: true
+---
+
+# Nagrek guardrails
+
+- Next.js 16 App Router. Read `node_modules/next/dist/docs/` before using a Next API. The request gate is `proxy.ts`.
+- Supabase Auth, Postgres, Realtime, and Storage. Every table keeps RLS. Server actions check the caller.
+- Secrets stay in `.env`. Never print them, never commit `.env.local`, never put a coupon code in client code.
+- Location is approximate. Calls are not recorded by default. The age gate is 18, and the client receives age in years, not the date of birth.
+- Client state stays in the session store plus sessionStorage or localStorage. Do not add Redux or Zustand.
+- Do not overwrite an existing skill, rule, or agent. The frontend skills already in `.cursor/skills/` stay as they are.
+- The user runs new SQL in the Supabase SQL editor. Do not apply it yourself.
+- Do not commit unless the user asks.
